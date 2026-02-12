@@ -69,7 +69,7 @@ public class SQLiteDataStore implements DataStore {
          fine_paid REAL NOT NULL,
          total_due REAL NOT NULL,
          amount_paid REAL NOT NULL,
-         REAL NOT NULL
+         balance REAL NOT NULL
      );
     """;
 
@@ -368,32 +368,29 @@ public void markAllFinesPaid(String plate, String paidTimeISO) {
     }
 }
 
-@Override //insert a payment record
+@Override
 public void createPayment(model.PaymentRecord p) {
-
     String sql = """
-        INSERT INTO payment
-        (ticket_no, plate, method, paid_time, parking_fee, fine_paid, total_due, amount_paid, balance)
+        INSERT INTO payment 
+        (ticket_no, plate, method, paid_time, parking_fee, fine_paid, total_due, amount_paid, balance) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
     """;
 
     try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-
         stmt.setString(1, p.getTicketNo());
         stmt.setString(2, p.getPlate());
         stmt.setString(3, p.getMethod());
         stmt.setString(4, p.getPaidTime());
-
         stmt.setDouble(5, p.getParkingFee());
         stmt.setDouble(6, p.getFinePaid());
         stmt.setDouble(7, p.getTotalDue());
         stmt.setDouble(8, p.getAmountPaid());
-        stmt.setDouble(9, p.getBalance());
+        stmt.setDouble(9, p.getBalance()); // This matches the 'balance' column we just fixed
 
         stmt.executeUpdate();
-        System.out.println("Payment saved for ticket: " + p.getTicketNo());
-
+        System.out.println("Payment saved to DB for: " + p.getPlate());
     } catch (SQLException e) {
+        System.err.println("Error saving payment: " + e.getMessage());
         e.printStackTrace();
     }
 }
