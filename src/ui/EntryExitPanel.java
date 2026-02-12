@@ -6,19 +6,18 @@ import service.ExitService;
 import service.PaymentProcessor;
 import enums.PaymentMethod;
 import data.DataStore;
+import model.PaymentRecord;
 
 public class EntryExitPanel extends JPanel {
     private JTextField plateField;
     private JTextArea displayArea;
     private JButton btnCheckOut, btnPay;
     
-    // Logic References
     private ExitService exitService;
     private PaymentProcessor paymentProcessor;
     
-    // Temporary state to hold current transaction info
-    private String currentPlate;
-    private double currentTotal;
+    // Store the record between calculation and payment
+    private PaymentRecord currentRecord;
 
     public EntryExitPanel(DataStore db, ExitService exitService, PaymentProcessor paymentProcessor) {
         this.exitService = exitService;
@@ -35,7 +34,7 @@ public class EntryExitPanel extends JPanel {
         inputPanel.add(btnCheckOut);
         
         // --- Display Section ---
-        displayArea = new JTextArea(15, 30);
+        displayArea = new JTextArea(15, 35);
         displayArea.setEditable(false);
         displayArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
         
@@ -55,42 +54,107 @@ public class EntryExitPanel extends JPanel {
     private void setupListeners() {
         btnCheckOut.addActionListener(e -> {
             String plate = plateField.getText().trim();
-            if (plate.isEmpty()) return;
+            if (plate.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please enter a plate number.");
+                return;
+            }
 
-            // 1. Fetch data from ExitService
-            // (In a real app, you'd return a DTO here. For now, let's assume success)
-            displayArea.setText("Calculating for " + plate + "...\n");
+            // 1. Fetch the breakdown from ExitService
+            // Note: Ensure ExitService.processExit returns the PaymentRecord object
+            currentRecord = exitService.processExit(plate, java.time.ZonedDateTime.now().toString());
             
-            // This triggers the internal logic we wrote earlier
-            // In a full implementation, ExitService should return the calculation results
-            exitService.processExit(plate, java.time.ZonedDateTime.now().toString());
-            
-            displayArea.append("\nSummary loaded above in console.\nReady for payment.");
-            btnPay.setEnabled(true);
-            currentPlate = plate;
+            if (currentRecord != null) {
+                updateDisplayWithSummary();
+                btnPay.setEnabled(true);
+            } else {
+                displayArea.setText("No active session found for: " + plate);
+                btnPay.setEnabled(false);
+            }
         });
 
         btnPay.addActionListener(e -> {
-            // 2. Select Payment Method via Popup
             PaymentMethod[] methods = PaymentMethod.values();
             PaymentMethod selected = (PaymentMethod) JOptionPane.showInputDialog(
-                    this, "Select Method", "Payment", 
+                    this, "Select Payment Method", "Payment", 
                     JOptionPane.QUESTION_MESSAGE, null, methods, methods[0]);
 
             if (selected != null) {
-                // 3. Complete Transaction
-                // Note: You'll need to pass the actual fee/fine variables here
-                // paymentProcessor.processPayment(...);
+                double amountPaid = currentRecord.getTotalDue();
                 
-                JOptionPane.showMessageDialog(this, "Payment Successful! Receipt Printed.");
-                resetUI();
+                // Requirement 5: Cash Balance Calculation
+                if (selected == PaymentMethod.CASH) {
+                    String input = JOptionPane.showInputDialog(this, 
+                        "Total Due: RM " + String.format("%.2f", currentRecord.getTotalDue()) + 
+                        "\nEnter Cash Amount Received:");
+                    try {
+                        amountPaid = Double.parseDouble(input);
+                        if (amountPaid < currentRecord.getTotalDue()) {
+                            JOptionPane.showMessageDialog(this, "Error: Insufficient cash provided.");
+                            return;
+                        }
+                    } catch (NumberFormatException ex) {
+                        return;
+                    }
+                }
+
+                // 2. Execute Payment (Saves to DB, clears fines, frees spot)
+                paymentProcessor.processPayment(
+                    currentRecord.getTicketNo(),
+                    currentRecord.getPlate(),
+                    currentRecord.getParkingFee(),
+                    currentRecord.getFinePaid(),
+                    selected,
+                    amountPaid
+                );
+
+                // 3. Update UI with the final formal receipt
+                updateDisplayWithFinalReceipt(selected, amountPaid);
+                
+                JOptionPane.showMessageDialog(this, "Payment Successful! Spot is now available.");
+                btnPay.setEnabled(false);
             }
         });
+    }
+
+    private void updateDisplayWithSummary() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("--- PRE-PAYMENT SUMMARY ---\n");
+        sb.append(String.format("Plate:        %s\n", currentRecord.getPlate()));
+        sb.append(String.format("Parking Fee:  RM %.2f\n", currentRecord.getParkingFee()));
+        sb.append(String.format("Fines Due:    RM %.2f\n", currentRecord.getFinePaid()));
+        sb.append("---------------------------\n");
+        sb.append(String.format("TOTAL DUE:    RM %.2f\n", currentRecord.getTotalDue()));
+        sb.append("---------------------------\n");
+        sb.append("Select 'Process Payment' to complete.");
+        displayArea.setText(sb.toString());
+    }
+
+    private void updateDisplayWithFinalReceipt(PaymentMethod method, double amountPaid) {
+        double balance = amountPaid - currentRecord.getTotalDue();
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append("===================================\n");
+        sb.append("       OFFICIAL RECEIPT            \n");
+        sb.append("===================================\n");
+        sb.append(String.format("Plate:           %s\n", currentRecord.getPlate()));
+        sb.append(String.format("Ticket No:      %s\n", currentRecord.getTicketNo()));
+        sb.append(String.format("Payment Method:  %s\n", method));
+        sb.append("-----------------------------------\n");
+        sb.append(String.format("Parking Fee:     RM %.2f\n", currentRecord.getParkingFee()));
+        sb.append(String.format("Fines Paid:      RM %.2f\n", currentRecord.getFinePaid()));
+        sb.append(String.format("Total Due:       RM %.2f\n", currentRecord.getTotalDue()));
+        sb.append("-----------------------------------\n");
+        sb.append(String.format("Amount Paid:     RM %.2f\n", amountPaid));
+        sb.append(String.format("Balance/Change:  RM %.2f\n", balance));
+        sb.append("===================================\n");
+        sb.append("    Thank you for your payment!    \n");
+        displayArea.setText(sb.toString());
     }
 
     private void resetUI() {
         plateField.setText("");
         displayArea.setText("");
         btnPay.setEnabled(false);
+        currentRecord = null;
     }
 }
