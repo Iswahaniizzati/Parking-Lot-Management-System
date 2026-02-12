@@ -2,7 +2,8 @@ package data;
 
 import java.util.List;
 import model.ParkingSpot;
-
+import model.FineRecord;
+import model.ParkingSession;
 // database interface
 //all modules only call these methods
 
@@ -22,9 +23,18 @@ public interface DataStore {
     model.ParkingSession getOpenSessionByPlate(String plate); //get the latest open session for a plate
     void closeSession(String ticketNo, String exitTimeISO, int durationHours, double parkingFee); //update session with exit time,duration and fee
     void addFine(model.FineRecord fine); //insert a fine record
-    java.util.List<model.FineRecord> getUnpaidFines(String plate);
     void markAllFinesPaid(String plate, String paidTimeISO); //mark all unpaid fines as paid
     void createPayment(model.PaymentRecord payment); //insert a payment record
+    List<FineRecord> getUnpaidFinesByPlate(String plate); // For ExitService
+    List<FineRecord> getAllUnpaidFines();               // For ReportingPanel
+    double getTotalRevenue();
+    int getOccupiedSpotCount();
+    int getTotalSpotCount();
+    String authenticate(String username, String password);
+    List<ParkingSpot> getAvailableSpots(String type);
+    double getTotalUnpaidFines();
+    List<ParkingSpot> getAllSpots();
+    List<ParkingSession> getAllActiveSessions();
 
 
     

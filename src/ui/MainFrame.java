@@ -1,37 +1,78 @@
 package ui;
 
-import javax.swing.*;
 import java.awt.*;
-import data.DataStore;
-import service.ExitService;
-import service.PaymentProcessor;
+import javax.swing.*;
 
 public class MainFrame extends JFrame {
-    private DataStore store;
-    private ExitService exitService;
-    private PaymentProcessor paymentProcessor;
+    private String role; 
 
-    public MainFrame(DataStore store, ExitService exitService, PaymentProcessor paymentProcessor) {
-        this.store = store;
-        this.exitService = exitService;
-        this.paymentProcessor = paymentProcessor;
-
-        // Basic Window Setup
+    public MainFrame(data.DataStore store, service.ExitService exitService, 
+                     service.PaymentProcessor paymentProcessor, String role) {
+        this.role = role;
+        
         setTitle("University Parking Management System");
-        setSize(800, 600);
+        setSize(1100, 800);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
+        setLayout(new BorderLayout());
 
-        // Layout: Tabbed Pane to separate Entry/Exit and Admin
+        // --- Initialize Panels ---
+        EntryPanel entryPanel = new EntryPanel(store);
+        ExitPanel exitPanel = new ExitPanel(store, exitService, paymentProcessor);
+        AdminPanel adminPanel = new AdminPanel(exitService, store);
+        ReportingPanel reportingPanel = new ReportingPanel(store);
+
+        // --- Header Setup ---
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(new Color(41, 128, 185));
+        headerPanel.setPreferredSize(new Dimension(0, 60));
+        
+        // Add Title
+        JLabel titleLabel = new JLabel("  PARKING CONTROL CENTER");
+        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 18));
+        titleLabel.setForeground(Color.WHITE);
+        headerPanel.add(titleLabel, BorderLayout.WEST); 
+
+        // Right side panel for User Info and Logout
+        JPanel rightHeaderPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 15));
+        rightHeaderPanel.setOpaque(false); 
+
+        JLabel userLabel = new JLabel("Logged in as: " + role);
+        userLabel.setForeground(Color.WHITE);
+        
+        // DECLARE ONCE: Setup Logout Button
+        JButton logoutBtn = new JButton("Logout");
+        logoutBtn.addActionListener(e -> {
+            this.dispose();
+            app.main.main(null); 
+        });
+
+        rightHeaderPanel.add(userLabel);
+        rightHeaderPanel.add(logoutBtn); 
+        
+        headerPanel.add(rightHeaderPanel, BorderLayout.EAST);
+        add(headerPanel, BorderLayout.NORTH);
+
+        // --- Tabs ---
         JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.addTab("Vehicle Entry", entryPanel);
+        tabbedPane.addTab("Vehicle Exit", exitPanel);
 
-        // 1. Entry/Exit Tab (Where the daily operations happen)
-        // You will need to create this panel or use a placeholder for now
-        tabbedPane.addTab("Entry/Exit Operations", new EntryExitPanel(store, exitService, paymentProcessor));
+        if (role.equalsIgnoreCase("Admin")) {
+            tabbedPane.addTab("Admin Dashboard", adminPanel);
+            tabbedPane.addTab("Live Reports", reportingPanel);
+        }
+        add(tabbedPane, BorderLayout.CENTER);
 
-        // 2. Admin Tab (Where schemes are changed)
-        tabbedPane.addTab("Admin Dashboard", new AdminPanel(exitService));
-
-        add(tabbedPane);
+        // --- Tab Change Listener ---
+        tabbedPane.addChangeListener(e -> {
+            int index = tabbedPane.getSelectedIndex();
+            if (index != -1) {
+                String title = tabbedPane.getTitleAt(index);
+                if (title.equals("Live Reports")) {
+                    reportingPanel.refreshStats(); 
+                }
+            }
+        });
     }
 }
