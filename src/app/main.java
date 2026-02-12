@@ -1,25 +1,42 @@
 package app;
 
 import builder.ParkingLotBuilder;
+import data.DataStore;
+import data.SQLiteDataStore;
+import enums.SpotType;
 import model.ParkingLot;
+import model.ParkingSpot;
+import model.ParkingSession;
 
-//this main is to test hani's part of creating parking lot, feel free to change for your part:)
 public class main {
 
     public static void main(String[] args) {
 
-        ParkingLot lot = new ParkingLotBuilder()
-                .setName("MMU Parking Lot")
-                .setNumFloors(3)
-                .setRowsPerFloor(2)
-                .setSpotsPerRow(6)
-                .setSpotDistributionPerRow(2, 2, 1, 1)
-                .build();
+        DataStore store = new SQLiteDataStore();
 
-        System.out.println("Parking lot created successfully.");
-        System.out.println("Total floors: " + lot.getFloors().size());
-        System.out.println("Total spots: " + lot.getAllSpots().size());
+        
+        store.connect(); //connect to database
+        store.initSchema(); //create tables if not exist
+
+    // Build parking lot structure (from builder)
+    builder.ParkingLotBuilder builder = new builder.ParkingLotBuilder()
+        .setName("University Parking Lot")
+        .setNumFloors(3)
+        .setRowsPerFloor(2)
+        .setSpotsPerRow(10)
+        .setSpotDistributionPerRow(2, 6, 1, 1); // compact, regular, handicapped, reserved
+
+    model.ParkingLot lot = builder.build();
+
+    // Seed all spots into database (loop through structure)
+    for (model.Floor floor : lot.getFloors()) {
+        for (model.Row row : floor.getRows()) {
+            for (model.ParkingSpot spot : row.getSpots()) {
+            store.upsertSpot(spot);
+        }
     }
 }
 
-
+        store.close(); //close db connection
+    }
+}
