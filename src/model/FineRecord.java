@@ -2,23 +2,34 @@ package model;
 
 public class FineRecord {
     private String plate;
-    private String reason;
-    private double amount;
-    private String issuedAt; // ISO Time String
+    private String type;
+    private double amount;       // current unpaid amount
+    private String issuedTime;
     private boolean paid;
 
-    public FineRecord(String plate, String reason, double amount, String issuedAt, boolean paid) {
+    public FineRecord(String plate, String type, double amount, String issuedTime, boolean paid) {
         this.plate = plate;
-        this.reason = reason;
+        this.type = type;
         this.amount = amount;
-        this.issuedAt = issuedAt;
+        this.issuedTime = issuedTime;
         this.paid = paid;
     }
 
-    // Getters
     public String getPlate() { return plate; }
-    public String getReason() { return reason; }
+    public String getType() { return type; }
     public double getAmount() { return amount; }
-    public String getIssuedAt() { return issuedAt; }
+    public String getIssuedTime() { return issuedTime; }
     public boolean isPaid() { return paid; }
+
+    public void setPaid(boolean paid) { this.paid = paid; }
+
+    // NEW: Reduce fine by partial payment
+    public void reduceAmount(double paidAmount) {
+        if (paidAmount >= amount) {
+            amount = 0;
+            paid = true;
+        } else {
+            amount -= paidAmount;
+        }
+    }
 }

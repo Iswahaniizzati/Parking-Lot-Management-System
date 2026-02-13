@@ -1,9 +1,9 @@
 package data;
 
 import java.util.List;
-import model.ParkingSpot;
 import model.FineRecord;
 import model.ParkingSession;
+import model.ParkingSpot;
 // database interface
 //all modules only call these methods
 
@@ -35,7 +35,8 @@ public interface DataStore {
     double getTotalUnpaidFines();
     List<ParkingSpot> getAllSpots();
     List<ParkingSession> getAllActiveSessions();
-
+    // Add new method to reduce unpaid fine
+    void reduceFineAmount(FineRecord fine, double amountPaid);
 
     
 }

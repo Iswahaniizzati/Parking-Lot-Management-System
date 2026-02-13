@@ -4,6 +4,8 @@ import data.DataStore;
 import enums.PaymentMethod;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import model.FineRecord;
 import model.PaymentRecord;
 
 public class PaymentProcessor {
@@ -14,39 +16,62 @@ public class PaymentProcessor {
     }
 
     /**
-     * Processes the payment and updates all database records.
+     * Processes payment and applies it to fines + parking fee.
+     * Supports partial payment.
      */
-    public void processPayment(String ticketNo, String plate, double parkingFee, 
+    public void processPayment(String ticketNo, String plate, double parkingFee,
                                double fineAmount, PaymentMethod method, double amountPaid) {
-        
+
         double totalDue = parkingFee + fineAmount;
-        double balance = amountPaid - totalDue;
+        double remaining = totalDue - amountPaid;
         String now = ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
 
-        // 1. Record the Payment in DB
+        // 1️⃣ Apply payment to fines first
+        List<FineRecord> unpaidFines = dataStore.getUnpaidFinesByPlate(plate);
+        double amountLeft = amountPaid;
+
+        for (FineRecord fine : unpaidFines) {
+            if (amountLeft <= 0) break;
+            double fineRemaining = fine.getAmount();
+            if (amountLeft >= fineRemaining) {
+                // Fully pay this fine
+                amountLeft -= fineRemaining;
+                dataStore.reduceFineAmount(fine, fineRemaining); // now marked paid
+            } else {
+                // Partial payment
+                dataStore.reduceFineAmount(fine, amountLeft);
+                amountLeft = 0;
+            }
+        }
+
+        // 2️⃣ Apply remaining payment to parking fee
+        double parkingPaid = Math.min(parkingFee, amountLeft);
+        amountLeft -= parkingPaid;
+
+        // 3️⃣ Record the Payment
         PaymentRecord record = new PaymentRecord(
-            ticketNo, plate, method.toString(), now, 
-            parkingFee, fineAmount, totalDue, amountPaid, balance
+                ticketNo,
+                plate,
+                method.toString(),
+                now,
+                parkingFee,
+                fineAmount,
+                totalDue,
+                amountPaid,
+                -Math.min(remaining, 0) // positive balance
         );
         dataStore.createPayment(record);
 
-        // 2. Close the Parking Session
-        // Note: You might want to pass actual duration calculated in ExitService
-        dataStore.closeSession(ticketNo, now, 0, parkingFee);
-
-        // 3. Mark Fines as Paid
-        if (fineAmount > 0) {
-            dataStore.markAllFinesPaid(plate, now);
+        // 4️⃣ Close the parking session if fully paid
+        if (amountPaid >= totalDue) {
+            dataStore.closeSession(ticketNo, now, 0, parkingFee);
+            var session = dataStore.getOpenSessionByPlate(plate);
+            if (session != null) {
+                dataStore.setSpotAvailable(session.getSpotId());
+            }
         }
 
-        // 4. Mark the Spot as Available
-        // We get the session to find which spot the vehicle was in
-        var session = dataStore.getOpenSessionByPlate(plate);
-        if (session != null) {
-            dataStore.setSpotAvailable(session.getSpotId());
-        }
-
-        // 5. Generate Receipt
+        // 5️⃣ Generate receipt
         printReceipt(record, now);
     }
 
