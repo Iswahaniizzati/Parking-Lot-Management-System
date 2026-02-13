@@ -41,7 +41,7 @@ public class ExitService {
         }
 
         // 4. Link fines to License Plate (Requirement 4)
-        List<FineRecord> unpaidFines = dataStore.getUnpaidFines(plate);
+        List<FineRecord> unpaidFines = dataStore.getUnpaidFinesByPlate(plate);
         double totalOldFines = unpaidFines.stream().mapToDouble(FineRecord::getAmount).sum();
         double totalFinesToPay = newFineAmount + totalOldFines;
 

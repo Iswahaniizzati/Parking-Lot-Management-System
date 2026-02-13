@@ -3,16 +3,12 @@ package model;
 import enums.SpotType;
 import enums.SpotStatus;
 
-//represents a single parking space in the parking lot
-
+// represents a single parking space in the parking lot
 public class ParkingSpot {
 
     private String spotId;
     private SpotType type;
     private SpotStatus status;
-
-    // For now we keep vehicle as String 
-    // Member 2 replace with Vehicle objec
     private String currentVehiclePlate;
 
     // Constructor
@@ -23,7 +19,18 @@ public class ParkingSpot {
         this.currentVehiclePlate = null;
     }
 
-    // Getter methods
+    // --- ADDED SETTERS FOR DATABASE SYNC ---
+    
+    public void setStatus(SpotStatus status) {
+        this.status = status;
+    }
+
+    public void setCurrentVehiclePlate(String currentVehiclePlate) {
+        this.currentVehiclePlate = currentVehiclePlate;
+    }
+
+    // --- EXISTING GETTERS ---
+    
     public String getSpotId() {
         return spotId;
     }
@@ -41,7 +48,7 @@ public class ParkingSpot {
     }
 
     public double getHourlyRate() {
-        return type.getHourlyRate(); //get rate from enum
+        return type.getHourlyRate(); // get rate from enum
     }
 
     // Check if spot is available
@@ -49,13 +56,13 @@ public class ParkingSpot {
         return status == SpotStatus.AVAILABLE;
     }
 
-    // Occupy the spot
+    // Occupy the spot (Logic for UI/Service)
     public void occupy(String plateNumber) {
         this.status = SpotStatus.OCCUPIED;
         this.currentVehiclePlate = plateNumber;
     }
 
-    // Release the spot
+    // Release the spot (Logic for UI/Service)
     public void release() {
         this.status = SpotStatus.AVAILABLE;
         this.currentVehiclePlate = null;
