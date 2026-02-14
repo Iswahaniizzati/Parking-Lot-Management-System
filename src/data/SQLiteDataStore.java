@@ -203,6 +203,7 @@ public class SQLiteDataStore implements DataStore {
             stmt.setDouble(3, fee);
             stmt.setString(4, ticketNo);
             stmt.executeUpdate();
+            System.out.println("Session " + ticketNo + " closed successfully.");
         } catch (SQLException e) { e.printStackTrace(); }
     }
 
@@ -267,9 +268,54 @@ public class SQLiteDataStore implements DataStore {
 
     // Boilerplate for interface compatibility
     @Override public List<model.ParkingSpot> getAvailableSpots(String type) { return findAvailableSpots(type); }
-    @Override public model.ParkingSession getOpenSessionByPlate(String p) { return null; /* Implement logic similar to closeSession */ }
-    @Override public void addFine(FineRecord f) {}
-    @Override public List<FineRecord> getUnpaidFinesByPlate(String p) { return new ArrayList<>(); }
+
+    @Override public model.ParkingSession getOpenSessionByPlate(String p) {
+        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, p);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return new model.ParkingSession(
+                        rs.getString("ticket_no"),
+                        rs.getString("plate"),
+                        rs.getString("spot_id"),
+                        rs.getString("entry_time")
+                    );
+                }
+            }
+        } catch (SQLException e) { e.printStackTrace(); }
+        return null;
+    }
+
+    @Override public void addFine(FineRecord f) {
+        String sql = "INSERT INTO fine (plate, reason, amount, issued_at, paid) VALUES (?, ?, ?, ?, 0)";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, f.getPlate());
+            pstmt.setString(2, f.getReason());
+            pstmt.setDouble(3, f.getAmount());
+            pstmt.setString(4, f.getIssuedAt());
+            pstmt.executeUpdate();
+        } catch (SQLException e) { e.printStackTrace(); }
+    }
+    @Override public List<FineRecord> getUnpaidFinesByPlate(String p) {
+        List<FineRecord> fines = new ArrayList<>();
+        String sql = "SELECT * FROM fine WHERE plate = ? AND paid = 0";
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, p);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    fines.add(new FineRecord(
+                        rs.getString("plate"),
+                        rs.getString("reason"),
+                        rs.getDouble("amount"),
+                        rs.getString("issued_at"),
+                        false
+                    ));
+                }
+            }
+        }catch (SQLException e) { e.printStackTrace(); }
+        return fines;
+    }
     @Override public List<FineRecord> getAllUnpaidFines() { return new ArrayList<>(); }
     @Override public void markAllFinesPaid(String p, String t) {}
     @Override public void createPayment(PaymentRecord p) {}

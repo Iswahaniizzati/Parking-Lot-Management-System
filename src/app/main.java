@@ -3,11 +3,12 @@ package app;
 import data.DataStore;
 import data.SQLiteDataStore;
 import fine.*;
+import service.EntryService;
 import service.ExitService;
 import service.PaymentProcessor;
 import javax.swing.SwingUtilities;
 
-public class main {
+public class Main {
 
     public static void main(String[] args) {
         // 1. Database Connection
@@ -24,6 +25,7 @@ public class main {
         // 4. Initialize Services
         ExitService exitService = new ExitService(store, initialScheme);
         PaymentProcessor paymentProcessor = new PaymentProcessor(store);
+        EntryService entryService = new EntryService(store);
 
         // 5. Cleanup Hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -41,7 +43,7 @@ public class main {
                 if (loginDlg.isSucceeded()) {
                     String role = loginDlg.getAuthenticatedRole();
                     // Launch MainFrame with all dependencies
-                    new ui.MainFrame(store, exitService, paymentProcessor, role).setVisible(true);
+                    new ui.MainFrame(store, exitService, entryService, paymentProcessor, role).setVisible(true);
                 } else {
                     System.exit(0);
                 }

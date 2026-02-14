@@ -34,4 +34,5 @@ public class ParkingSession {
     public String getEntryTime() {
         return entryTime;
     }
+
 }
