@@ -3,6 +3,7 @@ package ui;
 import javax.swing.*;
 import java.awt.*;
 import data.DataStore;
+import model.PaymentRecord;
 import service.ExitService;
 import service.PaymentProcessor;
 
@@ -13,6 +14,8 @@ public class ExitPanel extends JPanel {
     private JList<String> vehiclesInsideList;
     private DefaultListModel<String> listModel;
     private JButton processBtn;
+    private JCheckBox hcCheckBox;
+    private PaymentRecord currentRecord;
 
     public ExitPanel(DataStore store, ExitService exitService, PaymentProcessor paymentProcessor) {
         this.store = store;
@@ -25,6 +28,9 @@ public class ExitPanel extends JPanel {
         
         plateField = new JTextField(15);
         searchPanel.add(plateField);
+
+        hcCheckBox = new JCheckBox("HC Card Holder?");
+        searchPanel.add(hcCheckBox);
         
         JButton searchBtn = new JButton("Search Vehicle");
         searchPanel.add(searchBtn);
@@ -43,13 +49,14 @@ public class ExitPanel extends JPanel {
 
         // Left Column: Vehicles Inside
         listModel = new DefaultListModel<>();
-        vehiclesInsideList = new JList<>(listModel);
+        JList<String> vehiclesInsideList = new JList<>(listModel);
         JScrollPane listScroll = new JScrollPane(vehiclesInsideList);
         listScroll.setBorder(BorderFactory.createTitledBorder("Vehicles Inside"));
         listScroll.setPreferredSize(new Dimension(200, 0));
 
         // Right Column: Exit Receipt
         receiptArea = new JTextArea();
+        receiptArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
         receiptArea.setEditable(false);
         JScrollPane receiptScroll = new JScrollPane(receiptArea);
         receiptScroll.setBorder(BorderFactory.createTitledBorder("Exit Receipt / Invoice"));
@@ -60,12 +67,60 @@ public class ExitPanel extends JPanel {
         // --- BOTTOM SECTION: Action Button ---
         JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         processBtn = new JButton("Process Payment & Exit");
+        processBtn.setEnabled(false);
         processBtn.setBackground(new Color(52, 152, 219)); // Light blue color
         processBtn.setForeground(Color.WHITE);
         processBtn.setFont(new Font("SansSerif", Font.BOLD, 12));
         processBtn.setPreferredSize(new Dimension(200, 40));
         bottomPanel.add(processBtn);
 
+        //--- BUTTON LOGIC ---
+        // 1. Search Logic
+        searchBtn.addActionListener(e -> {
+            String plate = plateField.getText().trim();
+            if (plate.isEmpty()) return;
+
+            currentRecord = exitService.processExit(plate, hcCheckBox.isSelected());
+
+            if (currentRecord != null) {
+                receiptArea.setText(String.format(
+                    "      PARKING RECEIPT      \n" +
+                    "---------------------------\n" +
+                    "Ticket No: %s\n" +
+                    "Plate:     %s\n" +
+                    "Exit Time: %s\n" +
+                    "---------------------------\n" +
+                    "Parking Fee:   RM %.2f\n" +
+                    "Unpaid Fines:  RM %.2f\n" +
+                    "---------------------------\n" +
+                    "TOTAL AMOUNT DUE:     RM %.2f\n" +
+                    "---------------------------",
+                    currentRecord.getTicketNo(), currentRecord.getPlate(),
+                    currentRecord.getPaidTime(), currentRecord.getParkingFee(),
+                    currentRecord.getFinePaid(), currentRecord.getTotalDue()
+                ));
+                processBtn.setEnabled(true);
+            } else {
+                JOptionPane.showMessageDialog(this, "Vehicle not found!");
+                receiptArea.setText("");
+                processBtn.setEnabled(false);
+            }
+        });
+        //release spot
+        processBtn.addActionListener(e -> {
+            if (currentRecord != null) {
+                // Fetch spotId from the active session via store
+                String spotId = store.getOpenSessionByPlate(currentRecord.getPlate()).getSpotId();
+                exitService.finalizeExit(currentRecord.getTicketNo(),spotId, (int)Math.ceil(currentRecord.getTotalDue() / 5.0), currentRecord.getParkingFee(), currentRecord.getPlate());
+
+                JOptionPane.showMessageDialog(this, "Payment Received. Spot " + spotId + " is now AVAILABLE.");
+
+                receiptArea.setText("");
+                plateField.setText("");
+                processBtn.setEnabled(false);
+                refreshVehiclesInside();
+            }
+        });
         // Add panels to main container
         add(searchPanel, BorderLayout.NORTH);
         add(mainDisplayPanel, BorderLayout.CENTER);

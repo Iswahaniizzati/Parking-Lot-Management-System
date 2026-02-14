@@ -4,20 +4,23 @@ import javax.swing.*;
 import java.awt.*;
 import data.DataStore;
 import model.ParkingSpot;
+import service.EntryService;
 import model.ParkingSession;
 import enums.SpotType;
 import java.util.List;
 
 public class EntryPanel extends JPanel {
     private DataStore store;
+    private EntryService entryService;
     private JTextField plateField;
-    private JComboBox<SpotType> typeCombo;
+    private JComboBox<String> typeCombo;
     private JCheckBox hcCheckBox;
     private JPanel gridPanel;
     private String selectedSpotId = null; // Track the chosen spot
 
-    public EntryPanel(DataStore store) {
+    public EntryPanel(DataStore store, EntryService entryService) {
         this.store = store;
+        this.entryService = entryService;
         setLayout(new BorderLayout(20, 20));
         setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
@@ -41,7 +44,9 @@ public class EntryPanel extends JPanel {
         // Vehicle Type Label & Combo
         gbc.gridy = 2;
         formPanel.add(new JLabel("Vehicle Type:"), gbc);
-        typeCombo = new JComboBox<>(SpotType.values());
+        String[] vehicleTypes = {"Motorcycle", "Car", "SUV/Truck", "Handicapped"};
+        typeCombo = new JComboBox<>(vehicleTypes);
+        typeCombo.addActionListener(e -> refreshSpotGrid());
         gbc.gridy = 3;
         formPanel.add(typeCombo, gbc);
 
@@ -63,26 +68,25 @@ public class EntryPanel extends JPanel {
         // --- ADD ACTION LISTENER TO CONFIRM BUTTON ---
         confirmBtn.addActionListener(e -> {
             String plate = plateField.getText().trim();
+            String type = typeCombo.getSelectedItem().toString();
+
             if (plate.isEmpty() || selectedSpotId == null) {
                 JOptionPane.showMessageDialog(this, "Please enter a plate and select a green spot!");
                 return;
             }
 
             // 1. Create the session object
-            String ticketNo = "TKT-" + (System.currentTimeMillis() % 10000);
-            ParkingSession session = new ParkingSession(
-                ticketNo, plate, selectedSpotId, java.time.LocalDateTime.now().toString()
-            );
+            String ticketNo = entryService.registerVehicleEntry(plate, type, selectedSpotId);
 
-            // 2. Save to Database
-            store.createSession(session);
-            store.setSpotOccupied(selectedSpotId, plate);
+            if (ticketNo != null) {
+                JOptionPane.showMessageDialog(this, "Entry Successful!\nTicket Printed: " + ticketNo);
 
-            // 3. UI Feedback & Reset
-            JOptionPane.showMessageDialog(this, "Ticket Printed: " + ticketNo);
-            plateField.setText("");
-            selectedSpotId = null;
-            refreshSpotGrid(); // Turn the green spot RED
+                plateField.setText("");
+                selectedSpotId = null;
+                refreshSpotGrid();
+            } else {
+                JOptionPane.showMessageDialog(this, "Error: This spot is not suitable for a " + type + "!");
+            }
         });
 
         // --- RIGHT: Visual Spot Grid ---
@@ -97,9 +101,10 @@ public class EntryPanel extends JPanel {
 
     private void refreshSpotGrid() {
         gridPanel.removeAll();
+        String selectedType = typeCombo.getSelectedItem().toString().toUpperCase();
         // Fetch current status from Database
         for (ParkingSpot spot : store.getAllSpots()) {
-            JButton spotBtn = new JButton(spot.getSpotId());
+            JButton spotBtn = new JButton(spot.getSpotId() + " (" + spot.getType() + ")");
             spotBtn.setPreferredSize(new Dimension(80, 50));
             
             // Visual state based on DB status
@@ -107,19 +112,29 @@ public class EntryPanel extends JPanel {
                 spotBtn.setBackground(Color.RED);
                 spotBtn.setEnabled(false); 
             } else {
-                spotBtn.setBackground(Color.GREEN);
-                // Action Listener for selection
-                spotBtn.addActionListener(e -> {
-                    selectedSpotId = spot.getSpotId();
-                    JOptionPane.showMessageDialog(this, "Selected Spot: " + selectedSpotId);
-                });
+                boolean isSuitable = checkSuitability(selectedType, spot.getType().toString());
+                if (isSuitable) {
+                    spotBtn.setBackground(Color.GREEN);
+                    spotBtn.addActionListener(e -> {
+                        selectedSpotId = spot.getSpotId();
+                        JOptionPane.showMessageDialog(this, "Selected Spot: " + selectedSpotId);
+                    });
+                } else {
+                    spotBtn.setBackground(Color.GRAY);
+                    spotBtn.setEnabled(false); // Disable unsuitable spots
+                }
             }
-            
-            spotBtn.setOpaque(true);
-            spotBtn.setBorderPainted(true);
             gridPanel.add(spotBtn);
         }
         gridPanel.revalidate();
         gridPanel.repaint();
     }
+    private boolean checkSuitability(String vType, String sType) {
+        if (vType.equals("MOTORCYCLE")) return sType.equals("COMPACT");
+        if (vType.equals("CAR")) return sType.equals("COMPACT") || sType.equals("REGULAR");
+        if (vType.equals("SUV") || vType.equals("TRUCK")) return sType.equals("REGULAR");
+        if (vType.equals("HANDICAPPED")) return true; // Can park anywhere
+        return false;
+    }
+    
 }
