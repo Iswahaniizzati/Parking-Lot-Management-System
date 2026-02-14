@@ -6,6 +6,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import model.FineRecord;
+import model.ParkingSession;
 import model.PaymentRecord;
 
 public class PaymentProcessor {
@@ -23,7 +24,7 @@ public class PaymentProcessor {
                                double fineAmount, PaymentMethod method, double amountPaid) {
 
         double totalDue = parkingFee + fineAmount;
-        double remaining = totalDue - amountPaid;
+        double remaining = totalDue - amountPaid; // positive if still owed
         String now = ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
 
         // 1️⃣ Apply payment to fines first
@@ -32,11 +33,12 @@ public class PaymentProcessor {
 
         for (FineRecord fine : unpaidFines) {
             if (amountLeft <= 0) break;
+
             double fineRemaining = fine.getAmount();
             if (amountLeft >= fineRemaining) {
                 // Fully pay this fine
+                dataStore.reduceFineAmount(fine, fineRemaining); // marked as paid
                 amountLeft -= fineRemaining;
-                dataStore.reduceFineAmount(fine, fineRemaining); // now marked paid
             } else {
                 // Partial payment
                 dataStore.reduceFineAmount(fine, amountLeft);
@@ -58,20 +60,21 @@ public class PaymentProcessor {
                 fineAmount,
                 totalDue,
                 amountPaid,
-                -Math.min(remaining, 0) // positive balance
+                amountLeft > 0 ? 0 : -remaining // balance (positive if overpaid)
         );
         dataStore.createPayment(record);
 
-        // 4️⃣ Close the parking session if fully paid
+        // 4️⃣ Close parking session only if fully paid
         if (amountPaid >= totalDue) {
             dataStore.closeSession(ticketNo, now, 0, parkingFee);
-            var session = dataStore.getOpenSessionByPlate(plate);
+
+            ParkingSession session = dataStore.getOpenSessionByPlate(plate);
             if (session != null) {
                 dataStore.setSpotAvailable(session.getSpotId());
             }
         }
 
-        // 5️⃣ Generate receipt
+        // 5️⃣ Print receipt to console
         printReceipt(record, now);
     }
 
@@ -87,7 +90,7 @@ public class PaymentProcessor {
         System.out.println("-----------------------------------");
         System.out.println("Payment Method: " + p.getMethod());
         System.out.println("Amount Paid:    RM " + String.format("%.2f", p.getAmountPaid()));
-        System.out.println("Balance:        RM " + String.format("%.2f", p.getBalance()));
+        System.out.println("Balance/Change: RM " + String.format("%.2f", p.getBalance()));
         System.out.println("===================================\n");
     }
 }

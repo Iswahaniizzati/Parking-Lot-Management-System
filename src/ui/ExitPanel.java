@@ -6,6 +6,9 @@ import java.awt.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.event.ListSelectionEvent;
 import model.ParkingSession;
 import model.PaymentRecord;
 import service.ExitService;
@@ -23,9 +26,13 @@ public class ExitPanel extends JPanel {
     private DefaultListModel<String> listModel;
     private JButton processBtn;
     private JComboBox<PaymentMethod> methodCombo;
-
     private ExitService exitService;
     private PaymentProcessor paymentProcessor;
+
+    private JCheckBox manualTimeCheck;
+
+    private static final DateTimeFormatter TIME_FORMAT = 
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public ExitPanel(DataStore store, ExitService exitService, PaymentProcessor paymentProcessor) {
         this.store = store;
@@ -45,54 +52,49 @@ public class ExitPanel extends JPanel {
         JButton searchBtn = new JButton("Search Vehicle");
         searchPanel.add(searchBtn);
 
-        // Manual Exit Time Checkbox
-        JCheckBox manualTimeCheck = new JCheckBox("Manual Exit Time");
+        manualTimeCheck = new JCheckBox("Manual Exit Time");
         searchPanel.add(manualTimeCheck);
 
-        timeDisplay = new JTextField(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")), 19);
+        timeDisplay = new JTextField(LocalDateTime.now().format(TIME_FORMAT), 19);
         timeDisplay.setEditable(false);
         timeDisplay.setEnabled(false);
         searchPanel.add(timeDisplay);
 
-        // Payment Method Dropdown
         methodCombo = new JComboBox<>(PaymentMethod.values());
         searchPanel.add(new JLabel("Payment Method:"));
         searchPanel.add(methodCombo);
 
+        cardField = new JTextField(16);
+        cardField.setEnabled(false);
+        searchPanel.add(new JLabel("Card:"));
+        searchPanel.add(cardField);
 
-        methodCombo.addActionListener(e -> {
-            cardField.setEnabled(methodCombo.getSelectedItem() == PaymentMethod.CARD);
-        });
-
-        // --- CENTER SECTION: Two-Column Display ---
+        // --- CENTER SECTION ---
         JPanel mainDisplayPanel = new JPanel(new BorderLayout(15, 0));
 
-        // Left Column: Vehicles Inside
         listModel = new DefaultListModel<>();
         vehiclesInsideList = new JList<>(listModel);
         JScrollPane listScroll = new JScrollPane(vehiclesInsideList);
         listScroll.setBorder(BorderFactory.createTitledBorder("Vehicles Inside"));
-        listScroll.setPreferredSize(new Dimension(200, 0));
+        listScroll.setPreferredSize(new Dimension(220, 0));
+        mainDisplayPanel.add(listScroll, BorderLayout.WEST);
 
-        // Right Column: Exit Receipt
         receiptArea = new JTextArea();
         receiptArea.setEditable(false);
+        receiptArea.setFont(new Font("Monospaced", Font.PLAIN, 13));
         JScrollPane receiptScroll = new JScrollPane(receiptArea);
-        receiptScroll.setBorder(BorderFactory.createTitledBorder("Exit Receipt / Invoice"));
-
-        mainDisplayPanel.add(listScroll, BorderLayout.WEST);
+        receiptScroll.setBorder(BorderFactory.createTitledBorder("Exit Preview / Receipt"));
         mainDisplayPanel.add(receiptScroll, BorderLayout.CENTER);
 
-        // --- BOTTOM SECTION: Action Buttons ---
+        // --- BOTTOM SECTION ---
         JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-
         amountPaidField = new JTextField(8);
-        bottomPanel.add(new JLabel("Amount Paid:"));
+        bottomPanel.add(new JLabel("Amount Paid (RM):"));
         bottomPanel.add(amountPaidField);
 
         changeField = new JTextField(8);
         changeField.setEditable(false);
-        bottomPanel.add(new JLabel("Change:"));
+        bottomPanel.add(new JLabel("Change (RM):"));
         bottomPanel.add(changeField);
 
         processBtn = new JButton("Process Payment & Exit");
@@ -106,8 +108,50 @@ public class ExitPanel extends JPanel {
         add(mainDisplayPanel, BorderLayout.CENTER);
         add(bottomPanel, BorderLayout.SOUTH);
 
-        // --- Button Actions ---
-        searchBtn.addActionListener(e -> searchVehicle());
+        // ─── Listeners ──────────────────────────────────────────────────────
+
+        // Manual time checkbox control
+        manualTimeCheck.addActionListener(e -> {
+            boolean manual = manualTimeCheck.isSelected();
+            timeDisplay.setEditable(manual);
+            timeDisplay.setEnabled(manual);
+            timeDisplay.setBackground(manual ? new Color(255, 255, 210) : Color.WHITE);
+
+            if (!manual) {
+                timeDisplay.setText(LocalDateTime.now().format(TIME_FORMAT));
+            }
+            
+            refreshPreview();  // refresh after toggle
+        });
+
+        // Auto-refresh preview when manual time is edited
+        timeDisplay.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e)  { refreshPreview(); }
+            @Override public void removeUpdate(DocumentEvent e)   { refreshPreview(); }
+            @Override public void changedUpdate(DocumentEvent e)  { refreshPreview(); }
+        });
+
+        // Select vehicle from list → fill plate + show preview
+        vehiclesInsideList.addListSelectionListener((ListSelectionEvent e) -> {
+            if (!e.getValueIsAdjusting() && vehiclesInsideList.getSelectedValue() != null) {
+                String selected = vehiclesInsideList.getSelectedValue();
+                int endIndex = selected.indexOf(" (");
+                if (endIndex > 0) {
+                    String plate = selected.substring(0, endIndex).trim();
+                    plateField.setText(plate);
+                    refreshPreview();
+                }
+            }
+        });
+
+        // Payment method → enable/disable card field
+        methodCombo.addActionListener(e -> {
+            boolean isCard = methodCombo.getSelectedItem() == PaymentMethod.CARD;
+            cardField.setEnabled(isCard);
+            cardField.setBackground(isCard ? new Color(240, 248, 255) : Color.WHITE);
+        });
+
+        searchBtn.addActionListener(e -> refreshPreview());  // button now uses same logic
         processBtn.addActionListener(e -> processPaymentExit());
 
         refreshVehiclesInside();
@@ -116,36 +160,65 @@ public class ExitPanel extends JPanel {
     private void refreshVehiclesInside() {
         listModel.clear();
         store.getAllActiveSessions().forEach(session ->
-                listModel.addElement(session.getPlate() + " (" + session.getSpotId() + ")")
+            listModel.addElement(session.getPlate() + " (" + session.getSpotId() + ")")
         );
     }
 
-    private void searchVehicle() {
-        String plate = plateField.getText().trim();
+    private void refreshPreview() {
+        String plate = plateField.getText().trim().toUpperCase();
         if (plate.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please enter a plate number.");
+            receiptArea.setText("");
             return;
         }
 
         ParkingSession session = store.getOpenSessionByPlate(plate);
         if (session == null) {
-            JOptionPane.showMessageDialog(this, "Vehicle not found.");
+            receiptArea.setText("Vehicle not found or already exited.");
             return;
         }
 
-        receiptArea.setText("Vehicle Found:\n"
-                + "Ticket No: " + session.getTicketNo() + "\n"
-                + "Plate: " + session.getPlate() + "\n"
-                + "Spot: " + session.getSpotId() + "\n"
-                + "Entry Time: " + session.getEntryTime() + "\n"
+        String exitTimeStr = timeDisplay.getText().trim();
+
+        if (!exitTimeStr.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}")) {
+            receiptArea.setText("Invalid time format.\nUse: yyyy-MM-dd HH:mm:ss");
+            return;
+        }
+
+        long durationHours;
+        try {
+            durationHours = exitService.calculateHours(session.getEntryTime(), exitTimeStr);
+        } catch (Exception ex) {
+            receiptArea.setText("Error parsing times:\n" + ex.getMessage());
+            return;
+        }
+
+        PaymentRecord preview = exitService.calculateExitPreview(plate, exitTimeStr);
+        if (preview == null) {
+            receiptArea.setText("Error calculating fees.");
+            return;
+        }
+
+        receiptArea.setText(
+            "Vehicle Found:\n" +
+            "Ticket No:      " + preview.getTicketNo() + "\n" +
+            "Plate:          " + preview.getPlate() + "\n" +
+            "Spot:           " + session.getSpotId() + "\n" +
+            "Entry Time:     " + session.getEntryTime() + "\n" +
+            "Exit Time:      " + exitTimeStr + "\n" +
+            "Duration:       ≈ " + durationHours + " hours\n" +
+            "----------------------------------------\n" +
+            "Parking Fee:    RM " + String.format("%.2f", preview.getParkingFee()) + "\n" +
+            "Fines Due:      RM " + String.format("%.2f", preview.getFinePaid()) + "\n" +
+            "TOTAL DUE:      RM " + String.format("%.2f", preview.getTotalDue()) + "\n" +
+            "----------------------------------------\n" +
+            "Ready to pay → select method and amount."
         );
 
-        // Select vehicle in the list
         vehiclesInsideList.setSelectedValue(session.getPlate() + " (" + session.getSpotId() + ")", true);
     }
 
     private void processPaymentExit() {
-        String plate = plateField.getText().trim();
+        String plate = plateField.getText().trim().toUpperCase();
         if (plate.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Enter plate number first.");
             return;
@@ -157,16 +230,16 @@ public class ExitPanel extends JPanel {
             return;
         }
 
-        // Get exit time
-        String exitTime = timeDisplay.getText();
+        String exitTime = timeDisplay.getText().trim();
 
-        // Calculate fees & fines
-        PaymentRecord record = exitService.processExit(plate, exitTime);
+        // Validate time format
+        if (!exitTime.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}")) {
+            JOptionPane.showMessageDialog(this, "Invalid exit time format.");
+            return;
+        }
 
-        // Payment Method
         PaymentMethod method = (PaymentMethod) methodCombo.getSelectedItem();
 
-        // Card validation if CARD selected
         if (method == PaymentMethod.CARD) {
             String card = cardField.getText().trim();
             if (!card.matches("\\d{16}")) {
@@ -175,7 +248,6 @@ public class ExitPanel extends JPanel {
             }
         }
 
-        // Amount paid
         double amountPaid;
         try {
             amountPaid = Double.parseDouble(amountPaidField.getText().trim());
@@ -184,39 +256,70 @@ public class ExitPanel extends JPanel {
             return;
         }
 
-        double balance = amountPaid - record.getTotalDue();
-        changeField.setText(String.format("RM %.2f", Math.max(balance, 0)));
+        PaymentRecord preview = exitService.calculateExitPreview(plate, exitTime);
+        if (preview == null) {
+            JOptionPane.showMessageDialog(this, "Cannot calculate amount due.");
+            return;
+        }
 
-        // Update PaymentProcessor (partial payment allowed)
-        paymentProcessor.processPayment(
-                session.getTicketNo(),
-                plate,
-                record.getParkingFee(),
-                record.getFinePaid(),
-                method,
-                amountPaid
-        );
+        double totalDue = preview.getTotalDue();
 
-        JOptionPane.showMessageDialog(this, "Payment processed successfully.");
+        if (amountPaid < totalDue - 0.10) {
+            JOptionPane.showMessageDialog(this,
+                "Insufficient payment.\nTotal due: RM " + String.format("%.2f", totalDue),
+                "Payment Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        PaymentRecord finalRecord = exitService.processExit(plate, exitTime);
+        if (finalRecord == null) {
+            JOptionPane.showMessageDialog(this, "Failed to process exit.");
+            return;
+        }
+
+        try {
+            paymentProcessor.processPayment(
+                    finalRecord.getTicketNo(),
+                    plate,
+                    finalRecord.getParkingFee(),
+                    finalRecord.getFinePaid(),
+                    method,
+                    amountPaid
+            );
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage());
+            return;
+        }
+
+        double change = amountPaid - finalRecord.getTotalDue();
+        changeField.setText(String.format("RM %.2f", Math.max(0, change)));
+
+        receiptArea.setText(generateReceipt(finalRecord, amountPaid));
+
+        JOptionPane.showMessageDialog(this, "Payment processed successfully.\nVehicle may now exit.");
 
         refreshVehiclesInside();
-        receiptArea.setText(generateReceipt(record, amountPaid));
+        plateField.setText("");
+        amountPaidField.setText("");
+        changeField.setText("");
+        cardField.setText("");
+        receiptArea.setText("");
     }
 
     private String generateReceipt(PaymentRecord p, double amountPaid) {
         double balance = amountPaid - p.getTotalDue();
-        return  "========= PARKING RECEIPT =========\n" +
-                "Ticket No:      " + p.getTicketNo() + "\n" +
-                "Plate:          " + p.getPlate() + "\n" +
-                "Exit Time:      " + p.getPaidTime() + "\n" +
-                "-----------------------------------\n" +
-                "Parking Fee:    RM " + String.format("%.2f", p.getParkingFee()) + "\n" +
-                "Fines Due:      RM " + String.format("%.2f", p.getFinePaid()) + "\n" +
-                "TOTAL DUE:      RM " + String.format("%.2f", p.getTotalDue()) + "\n" +
-                "-----------------------------------\n" +
-                "Payment Method: " + p.getMethod() + "\n" +
-                "Amount Paid:    RM " + String.format("%.2f", amountPaid) + "\n" +
-                "Balance/Change: RM " + String.format("%.2f", Math.max(balance, 0)) + "\n" +
-                "===================================\n";
+        return "========= PARKING RECEIPT =========\n" +
+               "Ticket No: " + p.getTicketNo() + "\n" +
+               "Plate: " + p.getPlate() + "\n" +
+               "Exit Time: " + p.getPaidTime() + "\n" +
+               "-----------------------------------\n" +
+               "Parking Fee:    RM " + String.format("%.2f", p.getParkingFee()) + "\n" +
+               "Fines Due:      RM " + String.format("%.2f", p.getFinePaid()) + "\n" +
+               "TOTAL DUE:      RM " + String.format("%.2f", p.getTotalDue()) + "\n" +
+               "-----------------------------------\n" +
+               "Payment Method: " + p.getMethod() + "\n" +
+               "Amount Paid:    RM " + String.format("%.2f", amountPaid) + "\n" +
+               "Change:         RM " + String.format("%.2f", Math.max(balance, 0)) + "\n" +
+               "===================================\n";
     }
 }

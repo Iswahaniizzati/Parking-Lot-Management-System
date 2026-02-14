@@ -52,7 +52,7 @@ public class EntryPanel extends JPanel {
 
         // Confirm Button
         JButton confirmBtn = new JButton("Confirm & Print Ticket");
-        confirmBtn.setBackground(new Color(46, 204, 113)); // Green color
+        confirmBtn.setBackground(new Color(46, 204, 113)); // Green
         confirmBtn.setForeground(Color.WHITE);
         confirmBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
         gbc.gridy = 5;
@@ -60,34 +60,60 @@ public class EntryPanel extends JPanel {
         gbc.anchor = GridBagConstraints.NORTH;
         formPanel.add(confirmBtn, gbc);
 
-        // --- ADD ACTION LISTENER TO CONFIRM BUTTON ---
+        // --- Confirm Action Listener ---
         confirmBtn.addActionListener(e -> {
-            String plate = plateField.getText().trim();
-            if (plate.isEmpty() || selectedSpotId == null) {
-                JOptionPane.showMessageDialog(this, "Please enter a plate and select a green spot!");
+            String plate = plateField.getText().trim().toUpperCase();
+            if (plate.isEmpty()) {
+                JOptionPane.showMessageDialog(this, 
+                    "Please enter the license plate.", 
+                    "Input Required", JOptionPane.WARNING_MESSAGE);
                 return;
             }
 
-            // 1. Create the session object
-            String ticketNo = "TKT-" + (System.currentTimeMillis() % 10000);
-            ParkingSession session = new ParkingSession(
-                ticketNo, plate, selectedSpotId, java.time.LocalDateTime.now().toString()
-            );
+            if (selectedSpotId == null) {
+                JOptionPane.showMessageDialog(this, 
+                    "Please select an available parking spot.", 
+                    "Selection Required", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
 
-            // 2. Save to Database
+            // Optional: Check HC spot requirement
+            ParkingSpot selectedSpot = store.getSpotById(selectedSpotId);
+            if (selectedSpot.getType() == SpotType.HC && !hcCheckBox.isSelected()) {
+                JOptionPane.showMessageDialog(this, 
+                    "This is an HC (Handicap) spot.\nPlease select if the vehicle has HC privileges.", 
+                    "Spot Restriction", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            // Create session (time is now auto-set in ParkingSession constructor)
+            String ticketNo = "TKT-" + (System.currentTimeMillis() % 1000000); // simple but better uniqueness
+            ParkingSession session = new ParkingSession(ticketNo, plate, selectedSpotId);
+
+            // Save session & update spot status
             store.createSession(session);
             store.setSpotOccupied(selectedSpotId, plate);
 
-            // 3. UI Feedback & Reset
-            JOptionPane.showMessageDialog(this, "Ticket Printed: " + ticketNo);
+            // Success feedback
+            JOptionPane.showMessageDialog(this, 
+                "Vehicle entry recorded!\n" +
+                "Ticket No: " + ticketNo + "\n" +
+                "Plate: " + plate + "\n" +
+                "Spot: " + selectedSpotId + "\n" +
+                "Entry Time: " + session.getEntryTime(),
+                "Entry Successful", JOptionPane.INFORMATION_MESSAGE);
+
+            // Reset form
             plateField.setText("");
+            typeCombo.setSelectedIndex(0);
+            hcCheckBox.setSelected(false);
             selectedSpotId = null;
-            refreshSpotGrid(); // Turn the green spot RED
+            refreshSpotGrid(); // Refresh grid colors & labels
         });
 
         // --- RIGHT: Visual Spot Grid ---
         gridPanel = new JPanel(new GridLayout(0, 5, 10, 10));
-        gridPanel.setBorder(BorderFactory.createTitledBorder("Select an Available Spot"));
+        gridPanel.setBorder(BorderFactory.createTitledBorder("Available Parking Spots"));
         
         refreshSpotGrid();
 
@@ -97,28 +123,44 @@ public class EntryPanel extends JPanel {
 
     private void refreshSpotGrid() {
         gridPanel.removeAll();
-        // Fetch current status from Database
+
         for (ParkingSpot spot : store.getAllSpots()) {
-            JButton spotBtn = new JButton(spot.getSpotId());
-            spotBtn.setPreferredSize(new Dimension(80, 50));
-            
-            // Visual state based on DB status
+            JButton spotBtn = new JButton();
+            spotBtn.setPreferredSize(new Dimension(90, 60));
+            spotBtn.setFont(new Font("SansSerif", Font.BOLD, 12));
+
             if (!spot.isAvailable()) {
-                spotBtn.setBackground(Color.RED);
-                spotBtn.setEnabled(false); 
+                spotBtn.setBackground(new Color(220, 53, 69)); // Red
+                spotBtn.setForeground(Color.WHITE);
+                spotBtn.setText(spot.getSpotId() + "\nOCCUPIED");
+                spotBtn.setEnabled(false);
             } else {
-                spotBtn.setBackground(Color.GREEN);
-                // Action Listener for selection
-                spotBtn.addActionListener(e -> {
+                spotBtn.setBackground(new Color(40, 167, 69)); // Green
+                spotBtn.setForeground(Color.WHITE);
+                spotBtn.setText(spot.getSpotId() + "\nAVAILABLE\n" + spot.getType());
+
+                // Selection listener
+                spotBtn.addActionListener(ev -> {
                     selectedSpotId = spot.getSpotId();
-                    JOptionPane.showMessageDialog(this, "Selected Spot: " + selectedSpotId);
+                    // Optional: visual highlight
+                    for (Component c : gridPanel.getComponents()) {
+                        if (c instanceof JButton) {
+                            c.setBorder(BorderFactory.createEmptyBorder());
+                        }
+                    }
+                    spotBtn.setBorder(BorderFactory.createLineBorder(new Color(0, 123, 255), 4));
+                    JOptionPane.showMessageDialog(this, 
+                        "Spot selected: " + selectedSpotId + 
+                        "\nType: " + spot.getType(), 
+                        "Spot Selected", JOptionPane.INFORMATION_MESSAGE);
                 });
             }
-            
+
             spotBtn.setOpaque(true);
             spotBtn.setBorderPainted(true);
             gridPanel.add(spotBtn);
         }
+
         gridPanel.revalidate();
         gridPanel.repaint();
     }

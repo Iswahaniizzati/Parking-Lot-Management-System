@@ -1,13 +1,18 @@
 package model;
 
+import enums.FineReason;
+
 public class FineRecord {
+    private int id;
     private String plate;
-    private String type;
-    private double amount;       // current unpaid amount
+    private FineReason type;    // use enum
+    private double amount;      // current unpaid amount
     private String issuedTime;
     private boolean paid;
+    private String paidAt;
 
-    public FineRecord(String plate, String type, double amount, String issuedTime, boolean paid) {
+    // Constructor without ID
+    public FineRecord(String plate, FineReason type, double amount, String issuedTime, boolean paid) {
         this.plate = plate;
         this.type = type;
         this.amount = amount;
@@ -15,15 +20,31 @@ public class FineRecord {
         this.paid = paid;
     }
 
+    // Constructor with ID (DB loaded)
+    public FineRecord(int id, String plate, FineReason type, double amount, String issuedTime, boolean paid, String paidAt) {
+        this.id = id;
+        this.plate = plate;
+        this.type = type;
+        this.amount = amount;
+        this.issuedTime = issuedTime;
+        this.paid = paid;
+        this.paidAt = paidAt;
+    }
+
+    // Getters
+    public int getId() { return id; }
     public String getPlate() { return plate; }
-    public String getType() { return type; }
+    public FineReason getType() { return type; }
     public double getAmount() { return amount; }
     public String getIssuedTime() { return issuedTime; }
     public boolean isPaid() { return paid; }
+    public String getPaidAt() { return paidAt; }
 
+    // Setters
     public void setPaid(boolean paid) { this.paid = paid; }
+    public void setPaidAt(String paidAt) { this.paidAt = paidAt; }
 
-    // NEW: Reduce fine by partial payment
+    // Reduce fine by partial payment
     public void reduceAmount(double paidAmount) {
         if (paidAmount >= amount) {
             amount = 0;
