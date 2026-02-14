@@ -4,12 +4,15 @@ import enums.FineReason;
 import enums.SpotStatus;
 import enums.SpotType;
 import java.sql.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import model.FineRecord;
 import model.ParkingSession;
 import model.ParkingSpot;
 import model.PaymentRecord;
+import model.Vehicle;
 
 public class SQLiteDataStore implements DataStore {
 
@@ -35,6 +38,15 @@ public class SQLiteDataStore implements DataStore {
     public void initSchema() {
         String[] tables = {
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR(50) NOT NULL UNIQUE,
+                password VARCHAR(50) NOT NULL,
+                role VARCHAR(20) NOT NULL
+            );
+                   
+            """,
+            """
             CREATE TABLE IF NOT EXISTS parking_spot (
                 spot_id TEXT PRIMARY KEY,
                 spot_type TEXT NOT NULL,
@@ -49,6 +61,9 @@ public class SQLiteDataStore implements DataStore {
                 ticket_no TEXT UNIQUE NOT NULL,
                 plate TEXT NOT NULL,
                 spot_id TEXT NOT NULL,
+                vehicle_type TEXT,
+                has_hc_card INTEGER,
+                is_vip INTEGER,
                 entry_time TEXT NOT NULL,
                 exit_time TEXT,
                 duration_hours INTEGER,
@@ -80,7 +95,13 @@ public class SQLiteDataStore implements DataStore {
                 amount_paid REAL NOT NULL,
                 balance REAL NOT NULL
             );
+            """,
             """
+            CREATE TABLE IF NOT EXISTS config (
+                key VARCHAR(50) PRIMARY KEY,
+                value VARCHAR(100)
+            );
+            """,
         };
 
         try (Statement stmt = conn.createStatement()) {
@@ -88,6 +109,31 @@ public class SQLiteDataStore implements DataStore {
             System.out.println("Database tables ready.");
         } catch (SQLException e) { e.printStackTrace(); }
     }
+
+    @Override
+    public void setActiveFineScheme(String scheme) {
+        String sql = "INSERT INTO config(key, value) VALUES('active_fine_scheme', ?) " +
+                    "ON CONFLICT(key) DO UPDATE SET value = ?;";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, scheme);
+            stmt.setString(2, scheme);
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public String getActiveFineScheme() {
+        String sql = "SELECT value FROM config WHERE key='active_fine_scheme';";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) return rs.getString("value");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return "Fixed Fine (RM 50)"; // default fallback
+    }
+
 
     // --- Spot Management ---
     @Override
@@ -157,57 +203,101 @@ public class SQLiteDataStore implements DataStore {
     }
 
     // --- Session Management ---
+    // --- Create new session ---
     @Override
     public void createSession(ParkingSession session) {
         String sql = "INSERT INTO parking_session (ticket_no, plate, spot_id, entry_time) VALUES (?, ?, ?, ?);";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, session.getTicketNo());
-            stmt.setString(2, session.getPlate());
+            stmt.setString(2, session.getPlate());         // plate from Vehicle
             stmt.setString(3, session.getSpotId());
             stmt.setString(4, session.getEntryTime());
             stmt.executeUpdate();
-        } catch (SQLException e) { e.printStackTrace(); }
-    }
-
-    @Override
-    public ParkingSession getOpenSessionByPlate(String plate) {
-        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL LIMIT 1;";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, plate);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return new ParkingSession(
-                        rs.getString("ticket_no"),
-                        rs.getString("plate"),
-                        rs.getString("spot_id"),
-                        rs.getString("entry_time")
-                    );
-                }
-            }
-        } catch (SQLException e) { e.printStackTrace(); }
-        return null;
-    }
-
-    @Override
-    public List<ParkingSession> getAllActiveSessions() {
-        List<ParkingSession> sessions = new ArrayList<>();
-        String sql = "SELECT * FROM parking_session WHERE exit_time IS NULL;";
-        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                sessions.add(new ParkingSession(
-                    rs.getString("ticket_no"),
-                    rs.getString("plate"),
-                    rs.getString("spot_id"),
-                    rs.getString("entry_time")
-                ));
-            }
         } catch (SQLException e) {
             e.printStackTrace();
         }
+    }
+
+    // --- Get open session by plate ---
+    @Override
+    public ParkingSession getOpenSessionByPlate(String plate) {
+
+        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL LIMIT 1;";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, plate);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                if (rs.next()) {
+
+                    // Create vehicle with minimal info
+                    Vehicle vehicle = new Vehicle(
+                            rs.getString("plate"),
+                            "UNKNOWN",   // since not stored
+                            false,       // no HC info in session table
+                            false        // no VIP info in session table
+                    );
+
+                    return new ParkingSession(
+                        rs.getString("ticket_no"),
+                        vehicle,
+                        rs.getString("spot_id"),
+                        rs.getString("entry_time"),
+                        rs.getString("fine_scheme") // make sure your DB table has this column
+                    );
+                }
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+
+    // --- Get all active sessions ---
+    @Override
+    public List<ParkingSession> getAllActiveSessions() {
+
+        List<ParkingSession> sessions = new ArrayList<>();
+
+        String sql = "SELECT * FROM parking_session WHERE exit_time IS NULL;";
+
+        try (Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+
+                // Since vehicle details are NOT stored in DB,
+                // we reconstruct with default values
+                Vehicle vehicle = new Vehicle(
+                        rs.getString("plate"),
+                        "UNKNOWN",   // vehicle_type not stored
+                        false,       // has_hc_card not stored
+                        false        // is_vip not stored
+                );
+
+                sessions.add(new ParkingSession(
+                        rs.getString("ticket_no"),
+                        vehicle,
+                        rs.getString("spot_id"),
+                        rs.getString("entry_time"),
+                        rs.getString("fine_scheme")
+                ));
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
         return sessions;
     }
 
 
+    // --- Close session ---
     @Override
     public void closeSession(String ticketNo, String exitTimeISO, int durationHours, double parkingFee) {
         String sql = "UPDATE parking_session SET exit_time = ?, duration_hours = ?, parking_fee = ? WHERE ticket_no = ?;";
@@ -217,8 +307,12 @@ public class SQLiteDataStore implements DataStore {
             stmt.setDouble(3, parkingFee);
             stmt.setString(4, ticketNo);
             stmt.executeUpdate();
-        } catch (SQLException e) { e.printStackTrace(); }
+            System.out.println("Session " + ticketNo + " closed successfully.");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
+
 
     // --- Fine Management ---
     @Override
@@ -274,27 +368,31 @@ public class SQLiteDataStore implements DataStore {
 
     @Override
     public void reduceFineAmount(FineRecord fine, double amount) {
-        // Reduce the amount and mark as paid if fully paid
-        double remaining = fine.getAmount() - amount;
-        boolean fullyPaid = remaining <= 0;
+
+        // First update the object
+        fine.reduceAmount(amount);
+
+        boolean fullyPaid = fine.getAmount() <= 0;
 
         String sql = "UPDATE fine SET amount = ?, paid = ?, paid_at = ? WHERE fine_id = ?;";
+
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setDouble(1, Math.max(0, remaining));
+
+            stmt.setDouble(1, fine.getAmount());
             stmt.setInt(2, fullyPaid ? 1 : 0);
-            stmt.setString(3, fullyPaid ? java.time.ZonedDateTime.now().toString() : fine.getPaidAt());
+            stmt.setString(3,
+                    fullyPaid ? java.time.LocalDateTime.now().toString()
+                            : fine.getPaidAt());
+
             stmt.setInt(4, fine.getId());
+
             stmt.executeUpdate();
+
         } catch (SQLException e) {
             e.printStackTrace();
         }
-
-        // Update the object in memory as well
-        fine.reduceAmount(amount);
-        if (fullyPaid) {
-            fine.setPaidAt(java.time.ZonedDateTime.now().toString());
-        }
     }
+
 
     // --- Payment Management ---
     @Override
@@ -307,16 +405,24 @@ public class SQLiteDataStore implements DataStore {
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, payment.getTicketNo());
             stmt.setString(2, payment.getPlate());
-            stmt.setString(3, payment.getMethod());
-            stmt.setString(4, payment.getPaidTime());
+            
+            // Convert enum to String
+            stmt.setString(3, payment.getMethod().name());
+            
+            // Convert LocalDateTime to string in SQL format
+            stmt.setString(4, payment.getPaidTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            
             stmt.setDouble(5, payment.getParkingFee());
             stmt.setDouble(6, payment.getFinePaid());
             stmt.setDouble(7, payment.getTotalDue());
             stmt.setDouble(8, payment.getAmountPaid());
             stmt.setDouble(9, payment.getBalance());
             stmt.executeUpdate();
-        } catch (SQLException e) { e.printStackTrace(); }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
+
 
     @Override
     public List<FineRecord> getAllUnpaidFines() {
@@ -338,6 +444,47 @@ public class SQLiteDataStore implements DataStore {
         } catch (SQLException e) { e.printStackTrace(); }
         return fines;
     }
+
+    @Override
+    public List<PaymentRecord> getPaymentsByTicket(String ticketNo) {
+
+        List<PaymentRecord> payments = new ArrayList<>();
+
+        String sql = "SELECT * FROM payment WHERE ticket_no = ?;";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, ticketNo);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                while (rs.next()) {
+
+                    PaymentRecord record = new PaymentRecord(
+                            rs.getString("ticket_no"),
+                            rs.getString("plate"),
+                            enums.PaymentMethod.valueOf(rs.getString("method")),
+                            LocalDateTime.parse(
+                                    rs.getString("paid_time"),
+                                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                            ),
+                            0, // duration (not stored in payment table)
+                            rs.getDouble("parking_fee"),
+                            rs.getDouble("fine_paid"),
+                            rs.getDouble("amount_paid")
+                    );
+
+                    payments.add(record);
+                }
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return payments;
+    }
+
 
     // --- Admin Stats ---
     @Override
@@ -390,7 +537,9 @@ public class SQLiteDataStore implements DataStore {
         return null;
     }
 
-    // --- Interface compatibility ---
-    @Override public List<ParkingSpot> getAvailableSpots(String type) { return findAvailableSpots(type); }
+
+    // Boilerplate for interface compatibility
+    @Override public List<model.ParkingSpot> getAvailableSpots(String type) { return findAvailableSpots(type); }
+
 
 }

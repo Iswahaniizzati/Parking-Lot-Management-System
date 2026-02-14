@@ -1,23 +1,25 @@
 package ui;
 
-import javax.swing.*;
-import java.awt.*;
 import data.DataStore;
+import java.awt.*;
+import javax.swing.*;
 import model.ParkingSpot;
-import model.ParkingSession;
-import enums.SpotType;
-import java.util.List;
+import model.Vehicle;
+import service.EntryService;
 
 public class EntryPanel extends JPanel {
     private DataStore store;
+    private EntryService entryService;
     private JTextField plateField;
-    private JComboBox<SpotType> typeCombo;
+    private JComboBox<String> typeCombo;
     private JCheckBox hcCheckBox;
+    private JCheckBox vipCheckBox; // VIP checkbox
     private JPanel gridPanel;
     private String selectedSpotId = null; // Track the chosen spot
 
-    public EntryPanel(DataStore store) {
+    public EntryPanel(DataStore store, EntryService entryService) {
         this.store = store;
+        this.entryService = entryService;
         setLayout(new BorderLayout(20, 20));
         setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
@@ -41,7 +43,9 @@ public class EntryPanel extends JPanel {
         // Vehicle Type Label & Combo
         gbc.gridy = 2;
         formPanel.add(new JLabel("Vehicle Type:"), gbc);
-        typeCombo = new JComboBox<>(SpotType.values());
+        String[] vehicleTypes = {"Motorcycle", "Car", "SUV/Truck", "Handicapped"};
+        typeCombo = new JComboBox<>(vehicleTypes);
+        typeCombo.addActionListener(e -> refreshSpotGrid());
         gbc.gridy = 3;
         formPanel.add(typeCombo, gbc);
 
@@ -50,118 +54,103 @@ public class EntryPanel extends JPanel {
         gbc.gridy = 4;
         formPanel.add(hcCheckBox, gbc);
 
+        // VIP Checkbox
+        vipCheckBox = new JCheckBox("VIP Customer?");
+        gbc.gridy = 5;
+        formPanel.add(vipCheckBox, gbc);
+
         // Confirm Button
         JButton confirmBtn = new JButton("Confirm & Print Ticket");
         confirmBtn.setBackground(new Color(46, 204, 113)); // Green
         confirmBtn.setForeground(Color.WHITE);
         confirmBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
-        gbc.gridy = 5;
+        gbc.gridy = 6;
         gbc.weighty = 1.0; 
         gbc.anchor = GridBagConstraints.NORTH;
         formPanel.add(confirmBtn, gbc);
 
         // --- Confirm Action Listener ---
         confirmBtn.addActionListener(e -> {
-            String plate = plateField.getText().trim().toUpperCase();
-            if (plate.isEmpty()) {
-                JOptionPane.showMessageDialog(this, 
-                    "Please enter the license plate.", 
-                    "Input Required", JOptionPane.WARNING_MESSAGE);
+            String plate = plateField.getText().trim();
+            String type = typeCombo.getSelectedItem().toString();
+            boolean hasHcCard = hcCheckBox.isSelected();
+            boolean isVIP = vipCheckBox.isSelected(); // get VIP status
+
+            if (plate.isEmpty() || selectedSpotId == null) {
+                JOptionPane.showMessageDialog(this, "Please enter a plate and select a green spot!");
                 return;
             }
 
-            if (selectedSpotId == null) {
-                JOptionPane.showMessageDialog(this, 
-                    "Please select an available parking spot.", 
-                    "Selection Required", JOptionPane.WARNING_MESSAGE);
-                return;
+            // 1️⃣ Create Vehicle object with 4 arguments
+            Vehicle vehicle = new Vehicle(plate, type, hasHcCard, isVIP);
+
+            // 2️⃣ Register entry
+            String ticketNo = entryService.registerVehicleEntry(vehicle, selectedSpotId);
+
+            if (ticketNo != null) {
+                JOptionPane.showMessageDialog(this, "Entry Successful!\nTicket Printed: " + ticketNo);
+                plateField.setText("");
+                hcCheckBox.setSelected(false);
+                vipCheckBox.setSelected(false);
+                selectedSpotId = null;
+                refreshSpotGrid();
+            } else {
+                JOptionPane.showMessageDialog(this, "Error: This spot is not suitable for a " + type + "!");
             }
-
-            // Optional: Check HC spot requirement
-            ParkingSpot selectedSpot = store.getSpotById(selectedSpotId);
-            if (selectedSpot.getType() == SpotType.HC && !hcCheckBox.isSelected()) {
-                JOptionPane.showMessageDialog(this, 
-                    "This is an HC (Handicap) spot.\nPlease select if the vehicle has HC privileges.", 
-                    "Spot Restriction", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-
-            // Create session (time is now auto-set in ParkingSession constructor)
-            String ticketNo = "TKT-" + (System.currentTimeMillis() % 1000000); // simple but better uniqueness
-            ParkingSession session = new ParkingSession(ticketNo, plate, selectedSpotId);
-
-            // Save session & update spot status
-            store.createSession(session);
-            store.setSpotOccupied(selectedSpotId, plate);
-
-            // Success feedback
-            JOptionPane.showMessageDialog(this, 
-                "Vehicle entry recorded!\n" +
-                "Ticket No: " + ticketNo + "\n" +
-                "Plate: " + plate + "\n" +
-                "Spot: " + selectedSpotId + "\n" +
-                "Entry Time: " + session.getEntryTime(),
-                "Entry Successful", JOptionPane.INFORMATION_MESSAGE);
-
-            // Reset form
-            plateField.setText("");
-            typeCombo.setSelectedIndex(0);
-            hcCheckBox.setSelected(false);
-            selectedSpotId = null;
-            refreshSpotGrid(); // Refresh grid colors & labels
         });
 
         // --- RIGHT: Visual Spot Grid ---
         gridPanel = new JPanel(new GridLayout(0, 5, 10, 10));
         gridPanel.setBorder(BorderFactory.createTitledBorder("Available Parking Spots"));
-        
         refreshSpotGrid();
 
         add(formPanel, BorderLayout.WEST);
         add(new JScrollPane(gridPanel), BorderLayout.CENTER);
     }
 
+    // --- Refresh the parking spot grid ---
     private void refreshSpotGrid() {
         gridPanel.removeAll();
+        String selectedType = typeCombo.getSelectedItem().toString().toUpperCase();
 
         for (ParkingSpot spot : store.getAllSpots()) {
-            JButton spotBtn = new JButton();
-            spotBtn.setPreferredSize(new Dimension(90, 60));
-            spotBtn.setFont(new Font("SansSerif", Font.BOLD, 12));
+            JButton spotBtn = new JButton(spot.getSpotId() + " (" + spot.getType() + ")");
+            spotBtn.setPreferredSize(new Dimension(80, 50));
 
             if (!spot.isAvailable()) {
-                spotBtn.setBackground(new Color(220, 53, 69)); // Red
+                spotBtn.setBackground(new Color(220, 53, 69)); // Red = Occupied
                 spotBtn.setForeground(Color.WHITE);
                 spotBtn.setText(spot.getSpotId() + "\nOCCUPIED");
                 spotBtn.setEnabled(false);
             } else {
-                spotBtn.setBackground(new Color(40, 167, 69)); // Green
-                spotBtn.setForeground(Color.WHITE);
-                spotBtn.setText(spot.getSpotId() + "\nAVAILABLE\n" + spot.getType());
-
-                // Selection listener
-                spotBtn.addActionListener(ev -> {
-                    selectedSpotId = spot.getSpotId();
-                    // Optional: visual highlight
-                    for (Component c : gridPanel.getComponents()) {
-                        if (c instanceof JButton) {
-                            c.setBorder(BorderFactory.createEmptyBorder());
-                        }
-                    }
-                    spotBtn.setBorder(BorderFactory.createLineBorder(new Color(0, 123, 255), 4));
-                    JOptionPane.showMessageDialog(this, 
-                        "Spot selected: " + selectedSpotId + 
-                        "\nType: " + spot.getType(), 
-                        "Spot Selected", JOptionPane.INFORMATION_MESSAGE);
-                });
+                boolean suitable = checkSuitability(selectedType, spot.getType().toString());
+                if (suitable) {
+                    spotBtn.setBackground(Color.GREEN);
+                    spotBtn.addActionListener(e -> {
+                        selectedSpotId = spot.getSpotId();
+                        JOptionPane.showMessageDialog(this, "Selected Spot: " + selectedSpotId);
+                    });
+                } else {
+                    spotBtn.setBackground(Color.GRAY); // Unsuitable
+                    spotBtn.setEnabled(false);
+                }
             }
 
-            spotBtn.setOpaque(true);
-            spotBtn.setBorderPainted(true);
             gridPanel.add(spotBtn);
         }
 
         gridPanel.revalidate();
         gridPanel.repaint();
+    }
+
+    // --- Check suitability based on vehicle type and spot type ---
+    private boolean checkSuitability(String vType, String sType) {
+        switch (vType) {
+            case "MOTORCYCLE": return sType.equalsIgnoreCase("COMPACT");
+            case "CAR": return sType.equalsIgnoreCase("COMPACT") || sType.equalsIgnoreCase("REGULAR");
+            case "SUV/TRUCK": return sType.equalsIgnoreCase("REGULAR");
+            case "HANDICAPPED": return true; // HC can park anywhere
+            default: return false;
+        }
     }
 }

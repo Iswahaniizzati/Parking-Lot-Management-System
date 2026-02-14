@@ -1,38 +1,56 @@
 package model;
 
-public class PaymentRecord {
-    private String ticketNo;
-    private String plate;
-    private String method;
-    private String paidTime;
-    private double parkingFee;
-    private double finePaid;
-    private double totalDue;
-    private double amountPaid;
-    private double balance;
+import enums.PaymentMethod;
+import java.time.LocalDateTime;
 
-    public PaymentRecord(String ticketNo, String plate, String method, String paidTime, 
-                         double parkingFee, double finePaid, double totalDue, 
-                         double amountPaid, double balance) {
+public class PaymentRecord {
+
+    private final String ticketNo;
+    private final String plate;
+    private final PaymentMethod method;
+    private final LocalDateTime paidTime;
+
+    private final int durationHours;
+    private final double parkingFee;
+    private final double finePaid;
+    private final double totalDue;
+
+    private final double amountPaid;
+    private final double balance;
+
+    public PaymentRecord(String ticketNo,
+                         String plate,
+                         PaymentMethod method,
+                         LocalDateTime paidTime,
+                         int durationHours,
+                         double parkingFee,
+                         double finePaid,
+                         double amountPaid) {
+
         this.ticketNo = ticketNo;
         this.plate = plate;
         this.method = method;
         this.paidTime = paidTime;
+        this.durationHours = durationHours;
         this.parkingFee = parkingFee;
         this.finePaid = finePaid;
-        this.totalDue = totalDue;
+        this.totalDue = parkingFee + finePaid;
         this.amountPaid = amountPaid;
-        this.balance = balance;
+        this.balance = amountPaid - totalDue;
     }
 
-    // Getters
     public String getTicketNo() { return ticketNo; }
     public String getPlate() { return plate; }
-    public String getMethod() { return method; }
-    public String getPaidTime() { return paidTime; }
+    public PaymentMethod getMethod() { return method; }
+    public LocalDateTime getPaidTime() { return paidTime; }
+    public int getDurationHours() { return durationHours; }
     public double getParkingFee() { return parkingFee; }
     public double getFinePaid() { return finePaid; }
     public double getTotalDue() { return totalDue; }
     public double getAmountPaid() { return amountPaid; }
     public double getBalance() { return balance; }
+
+    public boolean isFullyPaid() {
+        return balance >= 0;
+    }
 }

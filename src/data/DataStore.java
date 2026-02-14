@@ -4,8 +4,7 @@ import java.util.List;
 import model.FineRecord;
 import model.ParkingSession;
 import model.ParkingSpot;
-// database interface
-//all modules only call these methods
+import model.PaymentRecord;
 
 public interface DataStore {
 
@@ -25,6 +24,7 @@ public interface DataStore {
     void addFine(model.FineRecord fine); //insert a fine record
     void markAllFinesPaid(String plate, String paidTimeISO); //mark all unpaid fines as paid
     void createPayment(model.PaymentRecord payment); //insert a payment record
+    List<PaymentRecord> getPaymentsByTicket(String ticketNo);
     List<FineRecord> getUnpaidFinesByPlate(String plate); // For ExitService
     List<FineRecord> getAllUnpaidFines();               // For ReportingPanel
     double getTotalRevenue();
@@ -35,8 +35,11 @@ public interface DataStore {
     double getTotalUnpaidFines();
     List<ParkingSpot> getAllSpots();
     List<ParkingSession> getAllActiveSessions();
-    // Add new method to reduce unpaid fine
     void reduceFineAmount(FineRecord fine, double amountPaid);
+    void setActiveFineScheme(String scheme);  // save fine scheme for future entries
+    String getActiveFineScheme();             // optional getter
+
+
 
     
 }

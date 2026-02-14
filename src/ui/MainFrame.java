@@ -6,7 +6,7 @@ import javax.swing.*;
 public class MainFrame extends JFrame {
     private String role; 
 
-    public MainFrame(data.DataStore store, service.ExitService exitService, 
+    public MainFrame(data.DataStore store, service.ExitService exitService, service.EntryService entryService,
                      service.PaymentProcessor paymentProcessor, String role) {
         this.role = role;
         
@@ -17,10 +17,10 @@ public class MainFrame extends JFrame {
         setLayout(new BorderLayout());
 
         // --- Initialize Panels ---
-        EntryPanel entryPanel = new EntryPanel(store);
-        ExitPanel exitPanel = new ExitPanel(store, exitService, paymentProcessor);
-        AdminPanel adminPanel = new AdminPanel(exitService, store);
         ReportingPanel reportingPanel = new ReportingPanel(store);
+        EntryPanel entryPanel = new EntryPanel(store, entryService);
+        ExitPanel exitPanel = new ExitPanel(store, exitService, paymentProcessor, reportingPanel);
+        AdminPanel adminPanel = new AdminPanel(exitService, store);
 
         // --- Header Setup ---
         JPanel headerPanel = new JPanel(new BorderLayout());
