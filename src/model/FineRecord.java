@@ -5,26 +5,26 @@ import enums.FineReason;
 public class FineRecord {
     private int id;
     private String plate;
-    private FineReason type;    // use enum
+    private FineReason reason;    // use enum
     private double amount;      // current unpaid amount
     private String issuedTime;
     private boolean paid;
     private String paidAt;
 
     // Constructor without ID
-    public FineRecord(String plate, FineReason type, double amount, String issuedTime, boolean paid) {
+    public FineRecord(String plate, FineReason reason, double amount, String issuedTime, boolean paid) {
         this.plate = plate;
-        this.type = type;
+        this.reason = reason;
         this.amount = amount;
         this.issuedTime = issuedTime;
         this.paid = paid;
     }
 
     // Constructor with ID (DB loaded)
-    public FineRecord(int id, String plate, FineReason type, double amount, String issuedTime, boolean paid, String paidAt) {
+    public FineRecord(int id, String plate, FineReason reason, double amount, String issuedTime, boolean paid, String paidAt) {
         this.id = id;
         this.plate = plate;
-        this.type = type;
+        this.reason = reason;
         this.amount = amount;
         this.issuedTime = issuedTime;
         this.paid = paid;
@@ -34,7 +34,7 @@ public class FineRecord {
     // Getters
     public int getId() { return id; }
     public String getPlate() { return plate; }
-    public FineReason getType() { return type; }
+    public FineReason getReason() { return reason; }
     public double getAmount() { return amount; }
     public String getIssuedTime() { return issuedTime; }
     public boolean isPaid() { return paid; }

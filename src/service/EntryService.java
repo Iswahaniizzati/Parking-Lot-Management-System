@@ -45,17 +45,21 @@ public class EntryService {
 
 
     private boolean isSpotSuitable(Vehicle vehicle, String spotType) {
-        switch (spotType.toUpperCase()) {
-            case "COMPACT":
-                return vehicle.getType().equalsIgnoreCase("MOTORCYCLE") || vehicle.getType().equalsIgnoreCase("CAR");
-            case "REGULAR":
-                return vehicle.getType().equalsIgnoreCase("CAR") || vehicle.getType().equalsIgnoreCase("SUV/TRUCK");
-            case "HANDICAPPED":
-                return vehicle.getType().equalsIgnoreCase("HANDICAPPED");
-            case "RESERVED":
-                return vehicle.isVIP(); // only VIP cars
-            default:
-                return false;
+        String vType = vehicle.getType().toUpperCase();
+        spotType = spotType.toUpperCase();
+
+        // Handicapped vehicles can park in ANY spot
+        if (vType.equals("HANDICAPPED")) {
+            return true;
         }
+
+        // Normal vehicles follow regular rules
+        return switch (spotType) {
+            case "COMPACT"     -> vType.equals("MOTORCYCLE") || vType.equals("CAR");
+            case "REGULAR"     -> vType.equals("CAR") || vType.equals("SUV/TRUCK");
+            case "HANDICAPPED" -> false;  // only handicapped vehicles allowed
+            case "RESERVED"    -> vehicle.isVIP();
+            default            -> false;
+        };
     }
 }

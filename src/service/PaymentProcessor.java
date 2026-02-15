@@ -82,6 +82,10 @@ public class PaymentProcessor {
         dataStore.closeSession(ticketNo, exitTimeStr, (int) hours, parkingFee);
         dataStore.setSpotAvailable(session.getSpotId());
 
+        System.out.println("Unpaid fines for " + plate + ": "
+            + dataStore.getUnpaidFinesByPlate(plate).size());
+
+
         // 7️⃣ Print receipt to console
         printReceipt(finalRecord, unpaidFines);
 

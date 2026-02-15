@@ -1,7 +1,9 @@
 package ui;
 
 import data.DataStore;
+import enums.SpotType;
 import java.awt.*;
+import java.util.List;
 import javax.swing.*;
 import model.ParkingSpot;
 import model.Vehicle;
@@ -56,6 +58,7 @@ public class EntryPanel extends JPanel {
 
         // VIP Checkbox
         vipCheckBox = new JCheckBox("VIP Customer?");
+        vipCheckBox.addActionListener(e -> refreshSpotGrid());
         gbc.gridy = 5;
         formPanel.add(vipCheckBox, gbc);
 
@@ -111,10 +114,24 @@ public class EntryPanel extends JPanel {
     // --- Refresh the parking spot grid ---
     private void refreshSpotGrid() {
         gridPanel.removeAll();
+        List<ParkingSpot> allSpots = store.getAllSpots();
+        System.out.println("EntryPanel: Loaded " + allSpots.size() + " spots from DB");
+
+        int occupiedCount = 0;
+        for (ParkingSpot spot : allSpots) {
+            if (!spot.isAvailable()) {
+                occupiedCount++;
+                System.out.println("  OCCUPIED → " + spot.getSpotId() + " | Plate: " + 
+                                spot.getCurrentVehiclePlate() + " | Type: " + spot.getType());
+            }
+        }
+        System.out.println("Total occupied spots detected: " + occupiedCount);
         String selectedType = typeCombo.getSelectedItem().toString().toUpperCase();
+        boolean isVIP = vipCheckBox.isSelected(); // VIP status
 
         for (ParkingSpot spot : store.getAllSpots()) {
-            JButton spotBtn = new JButton(spot.getSpotId() + " (" + spot.getType() + ")");
+            SpotType spotType = spot.getType(); // enum type
+            JButton spotBtn = new JButton(spot.getSpotId() + " (" + spotType + ")");
             spotBtn.setPreferredSize(new Dimension(80, 50));
 
             if (!spot.isAvailable()) {
@@ -123,7 +140,15 @@ public class EntryPanel extends JPanel {
                 spotBtn.setText(spot.getSpotId() + "\nOCCUPIED");
                 spotBtn.setEnabled(false);
             } else {
-                boolean suitable = checkSuitability(selectedType, spot.getType().toString());
+                boolean suitable;
+                if (isVIP) {
+                    // VIP: only RESERVED spots
+                    suitable = spotType == SpotType.RESERVED;
+                } else {
+                    // Normal users: check suitability based on selected vehicle type
+                    suitable = checkSuitability(selectedType, spotType);
+                }
+
                 if (suitable) {
                     spotBtn.setBackground(Color.GREEN);
                     spotBtn.addActionListener(e -> {
@@ -143,14 +168,22 @@ public class EntryPanel extends JPanel {
         gridPanel.repaint();
     }
 
+
+
     // --- Check suitability based on vehicle type and spot type ---
-    private boolean checkSuitability(String vType, String sType) {
+    private boolean checkSuitability(String vType, SpotType spotType) {
         switch (vType) {
-            case "MOTORCYCLE": return sType.equalsIgnoreCase("COMPACT");
-            case "CAR": return sType.equalsIgnoreCase("COMPACT") || sType.equalsIgnoreCase("REGULAR");
-            case "SUV/TRUCK": return sType.equalsIgnoreCase("REGULAR");
-            case "HANDICAPPED": return true; // HC can park anywhere
-            default: return false;
+            case "MOTORCYCLE":
+                return spotType == SpotType.COMPACT;
+            case "CAR":
+                return spotType == SpotType.COMPACT || spotType == SpotType.REGULAR;
+            case "SUV/TRUCK":
+                return spotType == SpotType.REGULAR;
+            case "HANDICAPPED":
+                return true; // HC can park anywhere
+            default:
+                return false;
         }
     }
+
 }

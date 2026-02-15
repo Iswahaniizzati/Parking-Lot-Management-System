@@ -1,10 +1,10 @@
 package data;
 
 import enums.FineReason;
+import enums.PaymentMethod;
 import enums.SpotStatus;
 import enums.SpotType;
 import java.sql.*;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -136,6 +136,124 @@ public class SQLiteDataStore implements DataStore {
 
 
     // --- Spot Management ---
+    /**
+     * Initializes all parking spots if they don't exist yet.
+     * Called once at app startup to ensure full parking lot is seeded.
+     */
+    public void initializeSpotsIfNeeded() {
+        // Define your full parking layout here (3 floors, 2 rows per floor, 10 spots per row)
+        // Spot distribution: 2 Compact, 6 Regular, 1 Handicapped, 1 Reserved per row
+        String[][] spotLayout = {
+            // Floor 1, Row 1
+            {"F1-R1-S1", "COMPACT"}, {"F1-R1-S2", "COMPACT"}, {"F1-R1-S3", "REGULAR"}, {"F1-R1-S4", "REGULAR"},
+            {"F1-R1-S5", "REGULAR"}, {"F1-R1-S6", "REGULAR"}, {"F1-R1-S7", "REGULAR"}, {"F1-R1-S8", "REGULAR"},
+            {"F1-R1-S9", "HANDICAPPED"}, {"F1-R1-S10", "RESERVED"},
+            // Floor 1, Row 2
+            {"F1-R2-S1", "COMPACT"}, {"F1-R2-S2", "COMPACT"}, {"F1-R2-S3", "REGULAR"}, {"F1-R2-S4", "REGULAR"},
+            {"F1-R2-S5", "REGULAR"}, {"F1-R2-S6", "REGULAR"}, {"F1-R2-S7", "REGULAR"}, {"F1-R2-S8", "REGULAR"},
+            {"F1-R2-S9", "HANDICAPPED"}, {"F1-R2-S10", "RESERVED"},
+            // Floor 2, Row 1
+            {"F2-R1-S1", "COMPACT"}, {"F2-R1-S2", "COMPACT"}, {"F2-R1-S3", "REGULAR"}, {"F2-R1-S4", "REGULAR"},
+            {"F2-R1-S5", "REGULAR"}, {"F2-R1-S6", "REGULAR"}, {"F2-R1-S7", "REGULAR"}, {"F2-R1-S8", "REGULAR"},
+            {"F2-R1-S9", "HANDICAPPED"}, {"F2-R1-S10", "RESERVED"},
+            // Floor 2, Row 2
+            {"F2-R2-S1", "COMPACT"}, {"F2-R2-S2", "COMPACT"}, {"F2-R2-S3", "REGULAR"}, {"F2-R2-S4", "REGULAR"},
+            {"F2-R2-S5", "REGULAR"}, {"F2-R2-S6", "REGULAR"}, {"F2-R2-S7", "REGULAR"}, {"F2-R2-S8", "REGULAR"},
+            {"F2-R2-S9", "HANDICAPPED"}, {"F2-R2-S10", "RESERVED"},
+            // Floor 3, Row 1
+            {"F3-R1-S1", "COMPACT"}, {"F3-R1-S2", "COMPACT"}, {"F3-R1-S3", "REGULAR"}, {"F3-R1-S4", "REGULAR"},
+            {"F3-R1-S5", "REGULAR"}, {"F3-R1-S6", "REGULAR"}, {"F3-R1-S7", "REGULAR"}, {"F3-R1-S8", "REGULAR"},
+            {"F3-R1-S9", "HANDICAPPED"}, {"F3-R1-S10", "RESERVED"},
+            // Floor 3, Row 2
+            {"F3-R2-S1", "COMPACT"}, {"F3-R2-S2", "COMPACT"}, {"F3-R2-S3", "REGULAR"}, {"F3-R2-S4", "REGULAR"},
+            {"F3-R2-S5", "REGULAR"}, {"F3-R2-S6", "REGULAR"}, {"F3-R2-S7", "REGULAR"}, {"F3-R2-S8", "REGULAR"},
+            {"F3-R2-S9", "HANDICAPPED"}, {"F3-R2-S10", "RESERVED"}
+        };
+
+        int createdCount = 0;
+        for (String[] spotData : spotLayout) {
+            String spotId = spotData[0];
+            SpotType type = SpotType.valueOf(spotData[1]);
+
+            if (!spotExists(spotId)) {
+                ParkingSpot newSpot = new ParkingSpot(spotId, type);
+                upsertSpot(newSpot);  // inserts with AVAILABLE status
+                createdCount++;
+                System.out.println("Created missing spot: " + spotId + " (" + type + ")");
+            }
+        }
+        if (createdCount == 0) {
+            System.out.println("All " + spotLayout.length + " spots already exist — no changes needed.");
+        } else {
+            System.out.println("Initialized " + createdCount + " missing spots. Total now: " + spotLayout.length);
+        }
+    }
+
+    /**
+     * Helper: Checks if a spot already exists in the database.
+     */
+    private boolean spotExists(String spotId) {
+        String sql = "SELECT 1 FROM parking_spot WHERE spot_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, spotId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next();  // true if row exists
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * On startup: ensure all open sessions have their spots marked OCCUPIED.
+     * Call this after seeding/initializing spots.
+     */
+    public void syncSpotStatusFromSessions() {
+        List<ParkingSession> openSessions = getAllActiveSessions();
+        int fixedCount = 0;
+
+        for (ParkingSession session : openSessions) {
+            String spotId = session.getSpotId();
+            String plate = session.getPlate();
+
+            // Check current spot status
+            ParkingSpot spot = getSpotById(spotId);  // add this helper if needed
+            if (spot != null && spot.isAvailable()) {
+                // Spot exists but is AVAILABLE → fix it
+                setSpotOccupied(spotId, plate);
+                fixedCount++;
+                System.out.println("Fixed inconsistent status: Spot " + spotId + 
+                                " marked OCCUPIED for plate " + plate);
+            }
+        }
+
+        if (fixedCount == 0) {
+            System.out.println("Spot statuses are consistent with open sessions.");
+        } else {
+            System.out.println("Fixed " + fixedCount + " inconsistent spot statuses.");
+        }
+    }
+
+    private ParkingSpot getSpotById(String spotId) {
+        String sql = "SELECT * FROM parking_spot WHERE spot_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, spotId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    SpotType type = SpotType.valueOf(rs.getString("spot_type").toUpperCase());
+                    ParkingSpot spot = new ParkingSpot(spotId, type);
+                    spot.setStatus(SpotStatus.valueOf(rs.getString("status").toUpperCase()));
+                    spot.setCurrentVehiclePlate(rs.getString("current_plate"));
+                    return spot;
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     @Override
     public void upsertSpot(ParkingSpot spot) {
         String sql = "INSERT OR REPLACE INTO parking_spot (spot_id, spot_type, status, hourly_rate, current_plate) VALUES (?, ?, ?, ?, ?);";
@@ -301,7 +419,7 @@ public class SQLiteDataStore implements DataStore {
         String sql = "INSERT INTO fine (plate, reason, amount, issued_at, paid) VALUES (?, ?, ?, ?, ?);";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, fine.getPlate());
-            stmt.setString(2, fine.getType().name());  // store enum name
+            stmt.setString(2, fine.getReason().name());  // store enum name
             stmt.setDouble(3, fine.getAmount());
             stmt.setString(4, fine.getIssuedTime());
             stmt.setInt(5, fine.isPaid() ? 1 : 0);
@@ -317,9 +435,13 @@ public class SQLiteDataStore implements DataStore {
         String sql = "SELECT * FROM fine WHERE plate = ? AND paid = 0;";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, plate);
+
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    FineReason reason = FineReason.valueOf(rs.getString("reason"));
+
+                    FineReason reason =
+                            FineReason.valueOf(rs.getString("reason"));
+
                     fines.add(new FineRecord(
                             rs.getInt("fine_id"),
                             rs.getString("plate"),
@@ -336,6 +458,7 @@ public class SQLiteDataStore implements DataStore {
         }
         return fines;
     }
+
 
     @Override
     public void markAllFinesPaid(String plate, String paidTimeISO) {
@@ -444,12 +567,9 @@ public class SQLiteDataStore implements DataStore {
                     PaymentRecord record = new PaymentRecord(
                             rs.getString("ticket_no"),
                             rs.getString("plate"),
-                            enums.PaymentMethod.valueOf(rs.getString("method")),
-                            LocalDateTime.parse(
-                                    rs.getString("paid_time"),
-                                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                            ),
-                            0, // duration (not stored in payment table)
+                            PaymentMethod.valueOf(rs.getString("method")),
+                            rs.getTimestamp("paid_time").toLocalDateTime(),
+                            0, // duration not stored in payment table
                             rs.getDouble("parking_fee"),
                             rs.getDouble("fine_paid"),
                             rs.getDouble("amount_paid")
@@ -465,6 +585,7 @@ public class SQLiteDataStore implements DataStore {
 
         return payments;
     }
+
 
 
     // --- Admin Stats ---
