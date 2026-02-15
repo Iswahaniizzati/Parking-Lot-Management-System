@@ -1,10 +1,10 @@
 package data;
 
 import enums.FineReason;
+import enums.PaymentMethod;
 import enums.SpotStatus;
 import enums.SpotType;
 import java.sql.*;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -301,7 +301,7 @@ public class SQLiteDataStore implements DataStore {
         String sql = "INSERT INTO fine (plate, reason, amount, issued_at, paid) VALUES (?, ?, ?, ?, ?);";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, fine.getPlate());
-            stmt.setString(2, fine.getType().name());  // store enum name
+            stmt.setString(2, fine.getReason().name());  // store enum name
             stmt.setDouble(3, fine.getAmount());
             stmt.setString(4, fine.getIssuedTime());
             stmt.setInt(5, fine.isPaid() ? 1 : 0);
@@ -317,9 +317,13 @@ public class SQLiteDataStore implements DataStore {
         String sql = "SELECT * FROM fine WHERE plate = ? AND paid = 0;";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, plate);
+
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    FineReason reason = FineReason.valueOf(rs.getString("reason"));
+
+                    FineReason reason =
+                            FineReason.valueOf(rs.getString("reason"));
+
                     fines.add(new FineRecord(
                             rs.getInt("fine_id"),
                             rs.getString("plate"),
@@ -336,6 +340,7 @@ public class SQLiteDataStore implements DataStore {
         }
         return fines;
     }
+
 
     @Override
     public void markAllFinesPaid(String plate, String paidTimeISO) {
@@ -444,12 +449,9 @@ public class SQLiteDataStore implements DataStore {
                     PaymentRecord record = new PaymentRecord(
                             rs.getString("ticket_no"),
                             rs.getString("plate"),
-                            enums.PaymentMethod.valueOf(rs.getString("method")),
-                            LocalDateTime.parse(
-                                    rs.getString("paid_time"),
-                                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                            ),
-                            0, // duration (not stored in payment table)
+                            PaymentMethod.valueOf(rs.getString("method")),
+                            rs.getTimestamp("paid_time").toLocalDateTime(),
+                            0, // duration not stored in payment table
                             rs.getDouble("parking_fee"),
                             rs.getDouble("fine_paid"),
                             rs.getDouble("amount_paid")
@@ -465,6 +467,7 @@ public class SQLiteDataStore implements DataStore {
 
         return payments;
     }
+
 
 
     // --- Admin Stats ---

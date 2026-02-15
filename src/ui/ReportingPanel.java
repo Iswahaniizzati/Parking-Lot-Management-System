@@ -92,7 +92,7 @@ public class ReportingPanel extends JPanel {
         for (FineRecord fine : unpaidFines) {
             finesModel.addRow(new Object[]{
                     fine.getPlate(),
-                    fine.getType(),
+                    fine.getReason().name(),
                     String.format("RM %.2f", fine.getAmount())
             });
         }
