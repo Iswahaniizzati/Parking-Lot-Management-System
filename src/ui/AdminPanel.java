@@ -93,6 +93,16 @@ public class AdminPanel extends JPanel {
 
         String[] options = {"Fixed Fine (RM 50)", "Progressive (Tiered)", "Hourly (RM 20/hr)"};
         schemeDropdown = new JComboBox<>(options);
+        
+        // ─── IMPORTANT: Load and pre-select the current active scheme ───
+        String currentScheme = store.getActiveFineScheme();
+        schemeDropdown.setSelectedItem(currentScheme);
+        
+        // Safety fallback: if the stored value isn't in the list (e.g. corrupted data), select first
+        if (schemeDropdown.getSelectedIndex() == -1) {
+            schemeDropdown.setSelectedIndex(0);
+        }
+        
         gbc.gridx = 1;
         finePanel.add(schemeDropdown, gbc);
 
@@ -105,7 +115,9 @@ public class AdminPanel extends JPanel {
         btnApply.addActionListener(e -> {
             String scheme = (String) schemeDropdown.getSelectedItem();
             store.setActiveFineScheme(scheme);
-            JOptionPane.showMessageDialog(this, "Fine policy updated for future records.");
+            JOptionPane.showMessageDialog(this, 
+                "Fine policy updated for future records.\n\n" +
+                "Active policy is now: " + scheme);
             refreshStats();
         });
 

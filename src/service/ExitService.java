@@ -33,32 +33,33 @@ public class ExitService {
     public PaymentRecord previewExit(ParkingSession session, LocalDateTime exitTime) {
         if (session == null) return null;
 
-        // 1️⃣ Calculate duration
         long hours = calculateHoursCeiling(session.getEntryTime(), exitTime);
-
-        // 2️⃣ Parking fee
         double parkingFee = hours * getHourlyRate(session, session.getVehicle());
 
-        // 3️⃣ New fines generated during this exit (preview)
-        double newFine = calculatePreviewFines(session, hours);
+        // Use the scheme that was active WHEN THIS VEHICLE ENTERED
+        FineScheme scheme = mapStringToScheme(session.getFineScheme());
+        if (scheme == null) {
+            scheme = activeFineScheme; // fallback for old sessions or missing data
+        }
 
-        // 4️⃣ Past unpaid fines
+        // Calculate potential new fines using the correct scheme
+        double newFine = calculatePreviewFines(session, hours, scheme);
+
+        // Past unpaid fines (unchanged)
         List<FineRecord> pastUnpaid = dataStore.getUnpaidFinesByPlate(session.getVehicle().getPlate());
         double pastFineTotal = pastUnpaid.stream().mapToDouble(FineRecord::getAmount).sum();
 
-        // 5️⃣ Total fines = past unpaid + new fine
         double totalFines = pastFineTotal + newFine;
 
-        // 6️⃣ Build preview record
         return new PaymentRecord(
             session.getTicketNo(),
             session.getVehicle().getPlate(),
-            null,                 // method unknown in preview
+            null,
             exitTime,
             (int) hours,
             parkingFee,
-            totalFines,           // include past fines
-            0                     // amountPaid 0 in preview
+            totalFines,
+            0
         );
     }
 
@@ -78,13 +79,11 @@ public class ExitService {
         FineScheme scheme = mapStringToScheme(session.getFineScheme());
         if (scheme == null) scheme = activeFineScheme;
 
-        // Generate new fines (if any)
         List<FineRecord> newFines = generateFinalFines(session, hours, exitTimeStr, scheme);
         for (FineRecord fine : newFines) {
             dataStore.addFine(fine);
         }
 
-        // Optionally mark all unpaid fines fully paid
         double amountLeft = payment.getAmountPaid() - payment.getParkingFee();
         List<FineRecord> unpaidFines = dataStore.getUnpaidFinesByPlate(plate);
 
@@ -95,12 +94,9 @@ public class ExitService {
             amountLeft -= toPay;
         }
 
-
-        // Close the parking session and free spot
         dataStore.closeSession(session.getTicketNo(), exitTimeStr, (int) hours, parkingFee);
         dataStore.setSpotAvailable(session.getSpotId());
 
-        // Create PaymentRecord with actual method & paid amount
         PaymentRecord finalizedPayment = new PaymentRecord(
                 session.getTicketNo(),
                 plate,
@@ -121,14 +117,18 @@ public class ExitService {
     // ===============================
     //  Preview fine calculation
     // ===============================
-    private double calculatePreviewFines(ParkingSession session, long hours) {
+    private double calculatePreviewFines(ParkingSession session, long hours, FineScheme scheme) {
         double total = 0;
 
-        // Overstay fine
-        if (hours > 24) total += activeFineScheme.calculateFine(hours - 24);
+        // Overstay fine – using the correct scheme
+        if (hours > 24) {
+            total += scheme.calculateFine(hours - 24);
+        }
 
-        // Reserved spot violation
-        if (session.getSpotId().contains("RES") && !session.getVehicle().isVIP()) total += 100.0;
+        // Reserved spot violation (fixed amount – no scheme dependency)
+        if (session.getSpotId().contains("RES") && !session.getVehicle().isVIP()) {
+            total += 100.0;
+        }
 
         return total;
     }
@@ -166,13 +166,22 @@ public class ExitService {
                 .findFirst().orElse(null);
 
         if (spot == null) return 5.0;
-        switch (spot.getType().toString().toUpperCase()) {
-            case "COMPACT": return 2.0;
-            case "REGULAR": return 5.0;
-            case "HANDICAPPED": return vehicle.hasHcCard() ? 0.0 : 2.0;
-            case "RESERVED": return 10.0;
-            default: return 5.0;
+
+        String spotType = spot.getType().toString().toUpperCase();
+
+        // Special rule: Handicapped vehicle with HC card gets discounted rate anywhere
+        if (vehicle.getType().equalsIgnoreCase("HANDICAPPED") && vehicle.hasHcCard()) {
+            return 2.0;
         }
+
+        // Normal rates by spot type
+        return switch (spotType) {
+            case "COMPACT"     -> 2.0;
+            case "REGULAR"     -> 5.0;
+            case "HANDICAPPED" -> vehicle.hasHcCard() ? 0.0 : 2.0;  // free only in HC spot with card
+            case "RESERVED"    -> 10.0;
+            default            -> 5.0;
+        };
     }
 
     private long calculateHoursCeiling(String entryTimeStr, LocalDateTime exitTime) {

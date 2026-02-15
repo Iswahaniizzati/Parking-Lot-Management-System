@@ -3,6 +3,7 @@ package ui;
 import data.DataStore;
 import enums.SpotType;
 import java.awt.*;
+import java.util.List;
 import javax.swing.*;
 import model.ParkingSpot;
 import model.Vehicle;
@@ -113,6 +114,18 @@ public class EntryPanel extends JPanel {
     // --- Refresh the parking spot grid ---
     private void refreshSpotGrid() {
         gridPanel.removeAll();
+        List<ParkingSpot> allSpots = store.getAllSpots();
+        System.out.println("EntryPanel: Loaded " + allSpots.size() + " spots from DB");
+
+        int occupiedCount = 0;
+        for (ParkingSpot spot : allSpots) {
+            if (!spot.isAvailable()) {
+                occupiedCount++;
+                System.out.println("  OCCUPIED → " + spot.getSpotId() + " | Plate: " + 
+                                spot.getCurrentVehiclePlate() + " | Type: " + spot.getType());
+            }
+        }
+        System.out.println("Total occupied spots detected: " + occupiedCount);
         String selectedType = typeCombo.getSelectedItem().toString().toUpperCase();
         boolean isVIP = vipCheckBox.isSelected(); // VIP status
 
