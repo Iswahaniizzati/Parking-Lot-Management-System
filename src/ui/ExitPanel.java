@@ -32,7 +32,6 @@ public class ExitPanel extends JPanel {
     private DefaultListModel<String> listModel;
     private JButton processBtn;
     private JCheckBox hcCheckBox;
-    private JLabel revenueLabel;
 
     private ParkingSession currentSession;
     private PaymentRecord previewRecord;
@@ -51,7 +50,6 @@ public class ExitPanel extends JPanel {
 
         initTopPanel();
         initCenterPanel();
-        initBottomPanel();
         refreshVehiclesInside();
     }
 
@@ -61,7 +59,7 @@ public class ExitPanel extends JPanel {
         plateField = new JTextField(12);
         topPanel.add(plateField);
 
-        hcCheckBox = new JCheckBox("HC Card Holder?");
+        hcCheckBox = new JCheckBox("Handicapped Card Holder?");
         topPanel.add(hcCheckBox);
 
         topPanel.add(new JLabel("Exit Time (yyyy-MM-ddTHH:mm):"));
@@ -69,7 +67,7 @@ public class ExitPanel extends JPanel {
         exitTimeField.setText(LocalDateTime.now().format(DISPLAY_FORMAT));
         topPanel.add(exitTimeField);
 
-        JButton searchBtn = new JButton("Preview Exit");
+        JButton searchBtn = new JButton("Calculate Parking Fees");
         topPanel.add(searchBtn);
         add(topPanel, BorderLayout.NORTH);
 
@@ -98,8 +96,26 @@ public class ExitPanel extends JPanel {
 
             previewRecord = exitService.previewExit(currentSession, exitTime);
             if (previewRecord != null) {
-                displayReceipt(previewRecord);
-                processBtn.setEnabled(true);
+                long hours = previewRecord.getDurationHours();
+                double unpaidFinesInDB = store.getUnpaidFinesByPlate(plate).stream().mapToDouble(FineRecord::getAmount).sum();
+                double currentRate = hcCheckBox.isSelected() ? 2.0 : (currentSession.getSpotId().contains("RES") ? 10.0 : 5.0);
+                double calculatedParkingFee = hours * currentRate;
+                double totalDue = calculatedParkingFee + unpaidFinesInDB;
+                String notificationMsg = String.format (
+                    "Vehicle: %s\n" +
+                    "Hours Parked: %d Hour(s)\n" +
+                    "Parking Fee: RM %.2f\n" +
+                    "Unpaid Fines: RM %.2f\n" +
+                    "---------------------------\n" +
+                    "TOTAL AMOUNT: RM %.2f\n\n" +
+                    "Proceed to payment?",
+                    plate, previewRecord.getDurationHours(), calculatedParkingFee, unpaidFinesInDB, totalDue
+                );
+                int response = JOptionPane.showConfirmDialog(this, notificationMsg, "Exit Preview - Pending Payment", JOptionPane.OK_CANCEL_OPTION, JOptionPane.INFORMATION_MESSAGE);
+
+                if (response == JOptionPane.OK_OPTION) {
+                    openPaymentDialog(); // If user clicks OK, open payment immediately
+                }
             }
 
         } catch (Exception ex) {
@@ -136,31 +152,41 @@ public class ExitPanel extends JPanel {
 
     private void initBottomPanel() {
         JPanel bottomPanel = new JPanel(new BorderLayout());
-        revenueLabel = new JLabel("Total Revenue: RM 0.00");
-        revenueLabel.setFont(new Font("Arial", Font.BOLD, 14));
-        bottomPanel.add(revenueLabel, BorderLayout.WEST);
 
         processBtn = new JButton("Confirm Payment & Exit");
-        processBtn.setEnabled(false);
+        processBtn.setEnabled(false); // Only enabled via popup flow
         processBtn.setBackground(new Color(52, 152, 219));
         processBtn.setForeground(Color.WHITE);
         processBtn.setPreferredSize(new Dimension(220, 40));
         bottomPanel.add(processBtn, BorderLayout.EAST);
         add(bottomPanel, BorderLayout.SOUTH);
 
-        processBtn.addActionListener(e -> openPaymentDialog());
+        //processBtn.addActionListener(e -> openPaymentDialog());
     }
 
     private void openPaymentDialog() {
         if (currentSession == null || previewRecord == null) return;
-
         LocalDateTime exitTime = previewRecord.getPaidTime();
-        double parkingFee = previewRecord.getParkingFee();
-
-        List<FineRecord> pastFines = store.getUnpaidFinesByPlate(currentSession.getVehicle().getPlate());
-
         long hours = previewRecord.getDurationHours();
-        List<FineRecord> newFines = new ArrayList<>();
+
+        double rate;
+
+        if (hcCheckBox.isSelected()) {
+            rate = 2.0;
+        } else {
+            String spotId = currentSession.getSpotId().toUpperCase();
+            if (spotId.contains("COM")) rate = 2.0;         //Compact
+            else if (spotId.contains("RES")) rate = 10.0;   //VIP
+            else rate = 5.0;                                   //Regular
+        }
+        double parkingFee = hours * rate;
+
+       List<FineRecord> pastFines = store.getUnpaidFinesByPlate(currentSession.getVehicle().getPlate());
+       double totalPastFines = pastFines.stream().mapToDouble(FineRecord::getAmount).sum();
+
+       List<FineRecord> newFines = new ArrayList<>();
+       double currentFine = 0.0;
+
         if (hours > 24) {
             newFines.add(new FineRecord(currentSession.getVehicle().getPlate(),
                     FineReason.OVERSTAY_24H,
@@ -175,34 +201,31 @@ public class ExitPanel extends JPanel {
                     exitTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                     false));
         }
-
         List<FineRecord> allFines = new ArrayList<>();
         allFines.addAll(pastFines);
         allFines.addAll(newFines);
 
         double totalFines = allFines.stream().mapToDouble(FineRecord::getAmount).sum();
+        double totalDueNow = parkingFee + totalFines;
 
-        // --- Payment Dialog ---
-        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Payment", true);
-        dialog.setLayout(new GridLayout(5, 2, 10, 10));
-        dialog.setSize(400, 230);
+        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Secure Payment", true);
+        dialog.setLayout(new GridLayout(6, 2, 10, 10));
+        dialog.setSize(450, 300);
         dialog.setLocationRelativeTo(this);
-
-        dialog.add(new JLabel("Payment Method:"));
+        dialog.add(new JLabel("  Payment Method:"));
         JComboBox<PaymentMethod> methodBox = new JComboBox<>(PaymentMethod.values());
         dialog.add(methodBox);
-
-        dialog.add(new JLabel("Parking Fee (RM):"));
+        dialog.add(new JLabel("  Parking Fee (RM):"));
         dialog.add(new JTextField(String.format("%.2f", parkingFee)) {{ setEditable(false); }});
-
-        dialog.add(new JLabel("Total Fines Due (RM):"));
-        dialog.add(new JTextField(String.format("%.2f", totalFines)) {{ setEditable(false); }});
-
-        dialog.add(new JLabel("Amount to Pay (RM):"));
-        JTextField paidField = new JTextField(String.format("%.2f", parkingFee + totalFines));
+        dialog.add(new JLabel("  Total Fines (RM):"));
+        dialog.add(new JTextField(String.format("%.2f", totalPastFines + currentFine)) {{ setEditable(false); }});
+        dialog.add(new JLabel("  TOTAL DUE (RM):"));
+        dialog.add(new JTextField(String.format("%.2f", totalDueNow)) {{ setEditable(false); }});
+        dialog.add(new JLabel("  Amount Paid (RM):"));
+        JTextField paidField = new JTextField(String.format("%.2f", totalDueNow));
         dialog.add(paidField);
 
-        JButton confirmBtn = new JButton("Confirm Payment");
+        JButton confirmBtn = new JButton("Complete Transaction");
         dialog.add(new JLabel());
         dialog.add(confirmBtn);
 
@@ -211,78 +234,53 @@ public class ExitPanel extends JPanel {
                 double typedAmount = Double.parseDouble(paidField.getText().trim());
                 PaymentMethod method = (PaymentMethod) methodBox.getSelectedItem();
 
-                if (typedAmount < parkingFee) {
-                    JOptionPane.showMessageDialog(dialog,
-                            "You must pay at least the full parking fee to exit!");
+                if (typedAmount < totalDueNow) {
+                    JOptionPane.showMessageDialog(dialog, "Insufficient payment! Total due is RM " + totalDueNow);
                     return;
                 }
-
                 double finePaid = 0.0;
                 double remainingAmount = typedAmount - parkingFee;
 
-                List<FineRecord> unpaidFines = store.getUnpaidFinesByPlate(currentSession.getVehicle().getPlate());
-                for (FineRecord f : unpaidFines) {
+                for (FineRecord f : allFines) {
                     if (remainingAmount <= 0) break;
                     double toPay = Math.min(f.getAmount(), remainingAmount);
                     store.reduceFineAmount(f, toPay);
                     finePaid += toPay;
                     remainingAmount -= toPay;
                 }
-
-                double totalPaid = parkingFee + finePaid;
-
-                PaymentRecord payment = new PaymentRecord(
-                        previewRecord.getTicketNo(),
-                        previewRecord.getPlate(),
-                        method,
-                        exitTime,
-                        previewRecord.getDurationHours(),
-                        parkingFee,
-                        finePaid,
-                        totalPaid
+                PaymentRecord payment = new PaymentRecord( 
+                    previewRecord.getTicketNo(),
+                    previewRecord.getPlate(),
+                    method,
+                    exitTime,
+                    (int)hours,
+                    parkingFee,
+                    finePaid,
+                    parkingFee + finePaid
                 );
 
                 exitService.confirmExit(currentSession, exitTime, payment, false);
 
-                JOptionPane.showMessageDialog(dialog, "Payment & Exit Successful!");
+                // the PaymentMethod and Balance after clicking confirm.
+                displayReceipt(payment);
+                JOptionPane.showMessageDialog(dialog, "Payment Successful! Vehicle Can Now Exit.");
                 dialog.dispose();
 
                 refreshVehiclesInside();
                 if (adminPanel != null) adminPanel.refreshStats();
                 if (reportingPanel != null) reportingPanel.refreshStats();
-                resetPanel();
-
-            } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(dialog, "Invalid amount entered!");
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(dialog, "Error processing payment: " + ex.getMessage());
+                processBtn.setEnabled(false);
+            }
+            catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialog, "Invalid numeric input.");
             }
         });
-
         dialog.setVisible(true);
     }
 
     private void displayReceipt(PaymentRecord record) {
         String plate = record.getPlate();
-        ParkingSession session = store.getOpenSessionByPlate(plate);
-
-        List<FineRecord> unpaidFines = store.getUnpaidFinesByPlate(plate);
-        List<FineRecord> sessionFines = new ArrayList<>();
-        if (session != null) {
-            long hours = record.getDurationHours();
-            sessionFines = exitService.getActiveFineScheme() != null ?
-                    exitService.generateFinalFines(session, hours,
-                            record.getPaidTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-                            exitService.getActiveFineScheme()) :
-                    new ArrayList<>();
-        }
-
-        List<FineRecord> allFines = new ArrayList<>();
-        allFines.addAll(unpaidFines);
-        allFines.addAll(sessionFines);
-
-        double totalFines = allFines.stream().mapToDouble(FineRecord::getAmount).sum();
-        double remainingFines = Math.max(0, totalFines - record.getFinePaid());
+        double unpaidFinesInDB = store.getUnpaidFinesByPlate(plate).stream().mapToDouble(FineRecord::getAmount).sum();
 
         StringBuilder sb = new StringBuilder();
         sb.append("========= PARKING RECEIPT =========\n");
@@ -290,30 +288,29 @@ public class ExitPanel extends JPanel {
         sb.append("Plate:          ").append(record.getPlate()).append("\n");
         sb.append("Exit Time:      ").append(record.getPaidTime()).append("\n");
         sb.append("-----------------------------------\n");
+        sb.append("Hours Parked:   ").append(record.getDurationHours()).append(" Hour(s)\n");
         sb.append("Parking Fee:    RM ").append(String.format("%.2f", record.getParkingFee())).append("\n");
-        sb.append("Fines Paid:     RM ").append(String.format("%.2f", record.getFinePaid())).append("\n");
-        sb.append("Remaining Fines: RM ").append(String.format("%.2f", remainingFines)).append("\n");
-        sb.append("TOTAL DUE:      RM ").append(String.format("%.2f", record.getAmountPaid())).append("\n");
+        sb.append("Unpaid Fines:   RM ").append(String.format("%.2f", unpaidFinesInDB)).append("\n");
+        double totalDue = record.getParkingFee() + unpaidFinesInDB;
+        sb.append("TOTAL AMOUNT:      RM ").append(String.format("%.2f", totalDue)).append("\n");
         sb.append("-----------------------------------\n");
-        sb.append("Payment Method: ").append(record.getMethod()).append("\n");
-        sb.append("Amount Paid:    RM ").append(String.format("%.2f", record.getAmountPaid())).append("\n");
-        sb.append("Balance/Change: RM ").append(String.format("%.2f", record.getBalance())).append("\n");
-        sb.append("===================================\n");
 
+        if (record.getMethod() != null) {
+            sb.append("Payment Method: ").append(record.getMethod()).append("\n");
+            sb.append("Amount Paid:    RM ").append(String.format("%.2f", record.getAmountPaid())).append("\n");
+            sb.append("Balance/Change: RM ").append(String.format("%.2f", record.getBalance())).append("\n");
+            sb.append("===================================\n");
+            sb.append("Thank you for parking with us!     \n");
+        }
         receiptArea.setText(sb.toString());
     }
-
     public void refreshVehiclesInside() {
         listModel.clear();
         store.getAllActiveSessions().forEach(session ->
                 listModel.addElement(session.getPlate() + " (" + session.getSpotId() + ")")
         );
-        double totalRev = store.getTotalRevenue();
-        revenueLabel.setText(String.format("Total Revenue: RM %.2f", totalRev));
     }
-
     private void resetPanel() {
-        receiptArea.setText("");
         plateField.setText("");
         hcCheckBox.setSelected(false);
         exitTimeField.setText(LocalDateTime.now().format(DISPLAY_FORMAT));

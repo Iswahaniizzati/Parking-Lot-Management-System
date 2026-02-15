@@ -14,7 +14,6 @@ public class EntryPanel extends JPanel {
     private EntryService entryService;
     private JTextField plateField;
     private JComboBox<String> typeCombo;
-    private JCheckBox hcCheckBox;
     private JCheckBox vipCheckBox; // VIP checkbox
     private JPanel gridPanel;
     private String selectedSpotId = null; // Track the chosen spot
@@ -51,11 +50,6 @@ public class EntryPanel extends JPanel {
         gbc.gridy = 3;
         formPanel.add(typeCombo, gbc);
 
-        // HC Card Checkbox
-        hcCheckBox = new JCheckBox("Has HC Card Holder?");
-        gbc.gridy = 4;
-        formPanel.add(hcCheckBox, gbc);
-
         // VIP Checkbox
         vipCheckBox = new JCheckBox("VIP Customer?");
         vipCheckBox.addActionListener(e -> refreshSpotGrid());
@@ -76,7 +70,7 @@ public class EntryPanel extends JPanel {
         confirmBtn.addActionListener(e -> {
             String plate = plateField.getText().trim();
             String type = typeCombo.getSelectedItem().toString();
-            boolean hasHcCard = hcCheckBox.isSelected();
+            boolean hasHcCard = type.equalsIgnoreCase("Handicapped");
             boolean isVIP = vipCheckBox.isSelected(); // get VIP status
 
             if (plate.isEmpty() || selectedSpotId == null) {
@@ -93,7 +87,6 @@ public class EntryPanel extends JPanel {
             if (ticketNo != null) {
                 JOptionPane.showMessageDialog(this, "Entry Successful!\nTicket Printed: " + ticketNo);
                 plateField.setText("");
-                hcCheckBox.setSelected(false);
                 vipCheckBox.setSelected(false);
                 selectedSpotId = null;
                 refreshSpotGrid();
