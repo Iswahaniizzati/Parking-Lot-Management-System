@@ -21,7 +21,8 @@ public class ExitPanel extends JPanel {
     private final DataStore store;
     private final ExitService exitService;
     private final PaymentProcessor paymentProcessor;
-    private final ReportingPanel reportingPanel;
+    private final AdminPanel adminPanel;
+    private final ReportingPanel reportingPanel; // CHANGED from ReportingPanel
 
     private JTextField plateField;
     private JTextField exitTimeField;
@@ -29,14 +30,17 @@ public class ExitPanel extends JPanel {
     private DefaultListModel<String> listModel;
     private JButton processBtn;
     private JCheckBox hcCheckBox;
+    private JLabel revenueLabel; 
 
     private ParkingSession currentSession;
     private PaymentRecord currentRecord;
 
-    public ExitPanel(DataStore store, ExitService exitService, PaymentProcessor paymentProcessor, ReportingPanel reportingPanel) {
+    // CONSTRUCTOR CHANGED to accept AdminPanel
+    public ExitPanel(DataStore store, ExitService exitService, PaymentProcessor paymentProcessor, AdminPanel adminPanel, ReportingPanel reportingPanel) {
         this.store = store;
         this.exitService = exitService;
         this.paymentProcessor = paymentProcessor;
+        this.adminPanel = adminPanel;
         this.reportingPanel = reportingPanel;
 
         setLayout(new BorderLayout(15, 15));
@@ -45,13 +49,11 @@ public class ExitPanel extends JPanel {
         initTopPanel();
         initCenterPanel();
         initBottomPanel();
-        refreshVehiclesInside();
+        refreshVehiclesInside(); 
     }
 
-    // ===================== TOP PANEL =====================
     private void initTopPanel() {
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
-
         topPanel.add(new JLabel("License Plate:"));
         plateField = new JTextField(12);
         topPanel.add(plateField);
@@ -66,14 +68,13 @@ public class ExitPanel extends JPanel {
 
         JButton searchBtn = new JButton("Search Vehicle");
         topPanel.add(searchBtn);
-
         add(topPanel, BorderLayout.NORTH);
 
         searchBtn.addActionListener(e -> searchVehicle());
     }
 
     private void searchVehicle() {
-        String plate = plateField.getText().trim();
+        String plate = plateField.getText().trim().toUpperCase().replace("O", "0");
         String exitText = exitTimeField.getText().trim();
 
         if (plate.isEmpty() || exitText.isEmpty()) {
@@ -83,7 +84,6 @@ public class ExitPanel extends JPanel {
 
         try {
             LocalDateTime exitTime = LocalDateTime.parse(exitText);
-
             currentSession = store.getOpenSessionByPlate(plate);
 
             if (currentSession == null) {
@@ -94,27 +94,27 @@ public class ExitPanel extends JPanel {
             }
 
             currentRecord = exitService.processExit(currentSession, exitTime);
-
             if (currentRecord != null) {
                 displayReceipt(currentRecord);
                 processBtn.setEnabled(true);
-            } else {
-                JOptionPane.showMessageDialog(this, "Error generating preview!");
-                receiptArea.setText("");
-                processBtn.setEnabled(false);
             }
-
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Invalid time format! Use yyyy-MM-ddTHH:mm");
         }
     }
 
-    // ===================== CENTER PANEL =====================
     private void initCenterPanel() {
         JPanel centerPanel = new JPanel(new BorderLayout(15, 0));
-
         listModel = new DefaultListModel<>();
         JList<String> vehiclesList = new JList<>(listModel);
+        
+        vehiclesList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting() && vehiclesList.getSelectedValue() != null) {
+                String selected = vehiclesList.getSelectedValue();
+                plateField.setText(selected.split(" ")[0]);
+            }
+        });
+
         JScrollPane listScroll = new JScrollPane(vehiclesList);
         listScroll.setBorder(BorderFactory.createTitledBorder("Vehicles Inside"));
         listScroll.setPreferredSize(new Dimension(200, 0));
@@ -130,9 +130,11 @@ public class ExitPanel extends JPanel {
         add(centerPanel, BorderLayout.CENTER);
     }
 
-    // ===================== BOTTOM PANEL =====================
     private void initBottomPanel() {
-        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        revenueLabel = new JLabel("Total Revenue: RM 0.00");
+        revenueLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        bottomPanel.add(revenueLabel, BorderLayout.WEST);
 
         processBtn = new JButton("Process Payment & Exit");
         processBtn.setEnabled(false);
@@ -140,64 +142,37 @@ public class ExitPanel extends JPanel {
         processBtn.setForeground(Color.WHITE);
         processBtn.setPreferredSize(new Dimension(200, 40));
 
-        bottomPanel.add(processBtn);
+        bottomPanel.add(processBtn, BorderLayout.EAST);
         add(bottomPanel, BorderLayout.SOUTH);
 
         processBtn.addActionListener(e -> openPaymentDialog());
     }
 
-    // ===================== PAYMENT DIALOG =====================
     private void openPaymentDialog() {
-
         if (currentSession == null || currentRecord == null) return;
 
-        LocalDateTime exitTime;
-        try {
-            exitTime = LocalDateTime.parse(exitTimeField.getText().trim());
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Invalid exit time format!");
-            return;
-        }
-
+        LocalDateTime exitTime = LocalDateTime.parse(exitTimeField.getText().trim());
         double parkingFee = currentRecord.getParkingFee();
-
         double totalFines = store.getUnpaidFinesByPlate(currentSession.getPlate())
-                .stream()
-                .mapToDouble(FineRecord::getAmount)
-                .sum();
+                .stream().mapToDouble(FineRecord::getAmount).sum();
 
-        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this),
-                "Payment", true);
-
+        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Payment", true);
         dialog.setLayout(new GridLayout(5, 2, 10, 10));
         dialog.setSize(350, 220);
         dialog.setLocationRelativeTo(this);
 
         dialog.add(new JLabel("Payment Method:"));
-
-        JComboBox<PaymentMethod> methodBox =
-                new JComboBox<>(new PaymentMethod[]{
-                        PaymentMethod.CASH,
-                        PaymentMethod.CARD
-                });
-
+        JComboBox<PaymentMethod> methodBox = new JComboBox<>(PaymentMethod.values());
         dialog.add(methodBox);
 
         dialog.add(new JLabel("Parking Fee (RM):"));
-        JTextField parkingFeeField =
-                new JTextField(String.format("%.2f", parkingFee));
-        parkingFeeField.setEditable(false);
-        dialog.add(parkingFeeField);
+        dialog.add(new JTextField(String.format("%.2f", parkingFee)) {{ setEditable(false); }});
 
         dialog.add(new JLabel("Total Fines Due (RM):"));
-        JTextField finesField =
-                new JTextField(String.format("%.2f", totalFines));
-        finesField.setEditable(false);
-        dialog.add(finesField);
+        dialog.add(new JTextField(String.format("%.2f", totalFines)) {{ setEditable(false); }});
 
         dialog.add(new JLabel("Amount to Pay (RM):"));
-        JTextField paidField =
-                new JTextField(String.format("%.2f", parkingFee + totalFines));
+        JTextField paidField = new JTextField(String.format("%.2f", parkingFee + totalFines));
         dialog.add(paidField);
 
         JButton confirmBtn = new JButton("Confirm Payment");
@@ -207,70 +182,38 @@ public class ExitPanel extends JPanel {
         confirmBtn.addActionListener(ev -> {
             try {
                 double amountPaid = Double.parseDouble(paidField.getText().trim());
-                PaymentMethod method =
-                        (PaymentMethod) methodBox.getSelectedItem();
+                PaymentMethod method = (PaymentMethod) methodBox.getSelectedItem();
 
-                if (amountPaid < parkingFee) {
-                    JOptionPane.showMessageDialog(dialog,
-                            "You must pay full parking fee first.");
-                    return;
-                }
+                boolean success = paymentProcessor.processPartialPayment(currentSession, method, amountPaid, exitTime);
 
-                boolean success =
-                        paymentProcessor.processPartialPayment(
-                                currentSession,
-                                method,
-                                amountPaid,
-                                exitTime
-                        );
-
-                if (!success) {
-                    JOptionPane.showMessageDialog(dialog, "Payment failed!");
-                    return;
-                }
-
-                JOptionPane.showMessageDialog(dialog, "Payment Successful!");
-                dialog.dispose();
-
-                // Refresh receipt preview
-                currentRecord =
-                        exitService.processExit(currentSession, exitTime);
-
-                displayReceipt(currentRecord);
-
-                refreshVehiclesInside();
-
-                if (reportingPanel != null) {
-                    reportingPanel.refreshStats();
-                }
-
-                if (currentRecord.getParkingFee() == 0) {
+                if (success) {
+                    JOptionPane.showMessageDialog(dialog, "Payment Successful!");
+                    dialog.dispose();
+                    
+                    refreshVehiclesInside(); // Update local list
+                    if (adminPanel != null) adminPanel.refreshStats();
+                    if (reportingPanel != null) reportingPanel.refreshStats(); // Update Admin Dashboard
                     resetPanel();
                 }
-
-            } catch (NumberFormatException ex2) {
-                JOptionPane.showMessageDialog(dialog, "Invalid amount!");
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, "Error processing payment.");
             }
         });
-
         dialog.setVisible(true);
     }
 
-    // ===================== RECEIPT =====================
     private void displayReceipt(PaymentRecord record) {
-        List<FineRecord> unpaidFines =
-                store.getUnpaidFinesByPlate(record.getPlate());
-
+        List<FineRecord> unpaidFines = store.getUnpaidFinesByPlate(record.getPlate());
         paymentProcessor.printReceipt(record, unpaidFines, receiptArea);
     }
 
-    // ===================== UTIL =====================
-    private void refreshVehiclesInside() {
+    public void refreshVehiclesInside() {
         listModel.clear();
         store.getAllActiveSessions().forEach(session ->
-                listModel.addElement(session.getPlate()
-                        + " (" + session.getSpotId() + ")")
+                listModel.addElement(session.getPlate() + " (" + session.getSpotId() + ")")
         );
+        double totalRev = store.getTotalRevenue();
+        if (revenueLabel != null) revenueLabel.setText(String.format("Total Revenue: RM %.2f", totalRev));
     }
 
     private void resetPanel() {

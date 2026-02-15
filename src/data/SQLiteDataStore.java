@@ -218,26 +218,19 @@ public class SQLiteDataStore implements DataStore {
         }
     }
 
-    // --- Get open session by plate ---
+// --- Get open session by plate ---
     @Override
     public ParkingSession getOpenSessionByPlate(String plate) {
-
-        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL LIMIT 1;";
-
+        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL;";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-
             stmt.setString(1, plate);
-
             try (ResultSet rs = stmt.executeQuery()) {
-
                 if (rs.next()) {
-
-                    // Create vehicle with minimal info
                     Vehicle vehicle = new Vehicle(
                             rs.getString("plate"),
-                            "UNKNOWN",   // since not stored
-                            false,       // no HC info in session table
-                            false        // no VIP info in session table
+                            "UNKNOWN", 
+                            false, 
+                            false 
                     );
 
                     return new ParkingSession(
@@ -245,39 +238,29 @@ public class SQLiteDataStore implements DataStore {
                         vehicle,
                         rs.getString("spot_id"),
                         rs.getString("entry_time"),
-                        rs.getString("fine_scheme") // make sure your DB table has this column
+                        "Fixed Fine (RM 50)" // HARDCODE this or fetch from config
                     );
                 }
             }
-
         } catch (SQLException e) {
             e.printStackTrace();
         }
-
         return null;
     }
-
 
     // --- Get all active sessions ---
     @Override
     public List<ParkingSession> getAllActiveSessions() {
-
         List<ParkingSession> sessions = new ArrayList<>();
-
         String sql = "SELECT * FROM parking_session WHERE exit_time IS NULL;";
-
         try (Statement stmt = conn.createStatement();
             ResultSet rs = stmt.executeQuery(sql)) {
-
             while (rs.next()) {
-
-                // Since vehicle details are NOT stored in DB,
-                // we reconstruct with default values
                 Vehicle vehicle = new Vehicle(
                         rs.getString("plate"),
-                        "UNKNOWN",   // vehicle_type not stored
-                        false,       // has_hc_card not stored
-                        false        // is_vip not stored
+                        "UNKNOWN",
+                        false,
+                        false
                 );
 
                 sessions.add(new ParkingSession(
@@ -285,14 +268,12 @@ public class SQLiteDataStore implements DataStore {
                         vehicle,
                         rs.getString("spot_id"),
                         rs.getString("entry_time"),
-                        rs.getString("fine_scheme")
+                        "Fixed Fine (RM 50)" // Removed rs.getString("fine_scheme")
                 ));
             }
-
         } catch (SQLException e) {
             e.printStackTrace();
         }
-
         return sessions;
     }
 
