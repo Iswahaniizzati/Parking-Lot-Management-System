@@ -8,7 +8,7 @@ import service.ExitService;
 import service.PaymentProcessor;
 import javax.swing.SwingUtilities;
 
-public class Main {
+public class main {
 
     public static void main(String[] args) {
         // 1. Database Connection

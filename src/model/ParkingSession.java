@@ -1,38 +1,39 @@
 package model;
- 
-//one parking record in database 
-//data only, not logic
-//use this when vehicle enters/exits
 
 public class ParkingSession {
+    private String ticketNo;
+    private Vehicle vehicle;
+    private String spotId;
+    private String entryTime;
+    private String exitTime;
+    private String fineScheme;  
 
-    private String ticketNo;   // Unique ticket number
-    private String plate;      // Vehicle plate number
-    private String spotId;     // Assigned parking spot
-    private String entryTime;  // ISO time string
-
-    // Constructor used when vehicle enters
-    public ParkingSession(String ticketNo, String plate, String spotId, String entryTime) {
+    public ParkingSession(String ticketNo, Vehicle vehicle, String spotId, String entryTime, String fineScheme) {
         this.ticketNo = ticketNo;
-        this.plate = plate;
+        this.vehicle = vehicle;
         this.spotId = spotId;
         this.entryTime = entryTime;
+        this.exitTime = null; // initially null
+        this.fineScheme = fineScheme; // store scheme
     }
 
-    public String getTicketNo() {
-        return ticketNo;
+    // Getter
+    public String getFineScheme() {
+        return fineScheme;
     }
 
-    public String getPlate() {
-        return plate;
+    public void setFineScheme(String fineScheme) {
+        this.fineScheme = fineScheme;
     }
 
-    public String getSpotId() {
-        return spotId;
-    }
-
-    public String getEntryTime() {
-        return entryTime;
-    }
-
+    // existing getters
+    public String getTicketNo() { return ticketNo; }
+    public Vehicle getVehicle() { return vehicle; }
+    public String getPlate() { return vehicle.getPlate(); }
+    public String getSpotId() { return spotId; }
+    public String getEntryTime() { return entryTime; }
+    public boolean hasHcCard() { return vehicle.hasHcCard(); }
+    public boolean isVIP() { return vehicle.isVIP(); }
+    public String getExitTime() { return exitTime; }
+    public void setExitTime(String exitTime) { this.exitTime = exitTime; }
 }

@@ -1,13 +1,11 @@
 package ui;
 
-import javax.swing.*;
-import java.awt.*;
 import data.DataStore;
+import java.awt.*;
+import javax.swing.*;
 import model.ParkingSpot;
+import model.Vehicle;
 import service.EntryService;
-import model.ParkingSession;
-import enums.SpotType;
-import java.util.List;
 
 public class EntryPanel extends JPanel {
     private DataStore store;
@@ -15,6 +13,7 @@ public class EntryPanel extends JPanel {
     private JTextField plateField;
     private JComboBox<String> typeCombo;
     private JCheckBox hcCheckBox;
+    private JCheckBox vipCheckBox; // VIP checkbox
     private JPanel gridPanel;
     private String selectedSpotId = null; // Track the chosen spot
 
@@ -55,33 +54,44 @@ public class EntryPanel extends JPanel {
         gbc.gridy = 4;
         formPanel.add(hcCheckBox, gbc);
 
+        // VIP Checkbox
+        vipCheckBox = new JCheckBox("VIP Customer?");
+        gbc.gridy = 5;
+        formPanel.add(vipCheckBox, gbc);
+
         // Confirm Button
         JButton confirmBtn = new JButton("Confirm & Print Ticket");
-        confirmBtn.setBackground(new Color(46, 204, 113)); // Green color
+        confirmBtn.setBackground(new Color(46, 204, 113)); // Green
         confirmBtn.setForeground(Color.WHITE);
         confirmBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
-        gbc.gridy = 5;
+        gbc.gridy = 6;
         gbc.weighty = 1.0; 
         gbc.anchor = GridBagConstraints.NORTH;
         formPanel.add(confirmBtn, gbc);
 
-        // --- ADD ACTION LISTENER TO CONFIRM BUTTON ---
+        // --- Confirm Action Listener ---
         confirmBtn.addActionListener(e -> {
             String plate = plateField.getText().trim();
             String type = typeCombo.getSelectedItem().toString();
+            boolean hasHcCard = hcCheckBox.isSelected();
+            boolean isVIP = vipCheckBox.isSelected(); // get VIP status
 
             if (plate.isEmpty() || selectedSpotId == null) {
                 JOptionPane.showMessageDialog(this, "Please enter a plate and select a green spot!");
                 return;
             }
 
-            // 1. Create the session object
-            String ticketNo = entryService.registerVehicleEntry(plate, type, selectedSpotId);
+            // 1️⃣ Create Vehicle object with 4 arguments
+            Vehicle vehicle = new Vehicle(plate, type, hasHcCard, isVIP);
+
+            // 2️⃣ Register entry
+            String ticketNo = entryService.registerVehicleEntry(vehicle, selectedSpotId);
 
             if (ticketNo != null) {
                 JOptionPane.showMessageDialog(this, "Entry Successful!\nTicket Printed: " + ticketNo);
-
                 plateField.setText("");
+                hcCheckBox.setSelected(false);
+                vipCheckBox.setSelected(false);
                 selectedSpotId = null;
                 refreshSpotGrid();
             } else {
@@ -91,50 +101,56 @@ public class EntryPanel extends JPanel {
 
         // --- RIGHT: Visual Spot Grid ---
         gridPanel = new JPanel(new GridLayout(0, 5, 10, 10));
-        gridPanel.setBorder(BorderFactory.createTitledBorder("Select an Available Spot"));
-        
+        gridPanel.setBorder(BorderFactory.createTitledBorder("Available Parking Spots"));
         refreshSpotGrid();
 
         add(formPanel, BorderLayout.WEST);
         add(new JScrollPane(gridPanel), BorderLayout.CENTER);
     }
 
+    // --- Refresh the parking spot grid ---
     private void refreshSpotGrid() {
         gridPanel.removeAll();
         String selectedType = typeCombo.getSelectedItem().toString().toUpperCase();
-        // Fetch current status from Database
+
         for (ParkingSpot spot : store.getAllSpots()) {
             JButton spotBtn = new JButton(spot.getSpotId() + " (" + spot.getType() + ")");
             spotBtn.setPreferredSize(new Dimension(80, 50));
-            
-            // Visual state based on DB status
+
             if (!spot.isAvailable()) {
-                spotBtn.setBackground(Color.RED);
-                spotBtn.setEnabled(false); 
+                spotBtn.setBackground(new Color(220, 53, 69)); // Red = Occupied
+                spotBtn.setForeground(Color.WHITE);
+                spotBtn.setText(spot.getSpotId() + "\nOCCUPIED");
+                spotBtn.setEnabled(false);
             } else {
-                boolean isSuitable = checkSuitability(selectedType, spot.getType().toString());
-                if (isSuitable) {
+                boolean suitable = checkSuitability(selectedType, spot.getType().toString());
+                if (suitable) {
                     spotBtn.setBackground(Color.GREEN);
                     spotBtn.addActionListener(e -> {
                         selectedSpotId = spot.getSpotId();
                         JOptionPane.showMessageDialog(this, "Selected Spot: " + selectedSpotId);
                     });
                 } else {
-                    spotBtn.setBackground(Color.GRAY);
-                    spotBtn.setEnabled(false); // Disable unsuitable spots
+                    spotBtn.setBackground(Color.GRAY); // Unsuitable
+                    spotBtn.setEnabled(false);
                 }
             }
+
             gridPanel.add(spotBtn);
         }
+
         gridPanel.revalidate();
         gridPanel.repaint();
     }
+
+    // --- Check suitability based on vehicle type and spot type ---
     private boolean checkSuitability(String vType, String sType) {
-        if (vType.equals("MOTORCYCLE")) return sType.equals("COMPACT");
-        if (vType.equals("CAR")) return sType.equals("COMPACT") || sType.equals("REGULAR");
-        if (vType.equals("SUV") || vType.equals("TRUCK")) return sType.equals("REGULAR");
-        if (vType.equals("HANDICAPPED")) return true; // Can park anywhere
-        return false;
+        switch (vType) {
+            case "MOTORCYCLE": return sType.equalsIgnoreCase("COMPACT");
+            case "CAR": return sType.equalsIgnoreCase("COMPACT") || sType.equalsIgnoreCase("REGULAR");
+            case "SUV/TRUCK": return sType.equalsIgnoreCase("REGULAR");
+            case "HANDICAPPED": return true; // HC can park anywhere
+            default: return false;
+        }
     }
-    
 }

@@ -3,8 +3,6 @@ package ui;
 import java.awt.*;
 import javax.swing.*;
 
-import service.EntryService;
-
 public class MainFrame extends JFrame {
     private String role; 
 
@@ -19,10 +17,10 @@ public class MainFrame extends JFrame {
         setLayout(new BorderLayout());
 
         // --- Initialize Panels ---
-        EntryPanel entryPanel = new EntryPanel(store, entryService);
-        ExitPanel exitPanel = new ExitPanel(store, exitService, paymentProcessor);
-        AdminPanel adminPanel = new AdminPanel(exitService, store);
         ReportingPanel reportingPanel = new ReportingPanel(store);
+        EntryPanel entryPanel = new EntryPanel(store, entryService);
+        ExitPanel exitPanel = new ExitPanel(store, exitService, paymentProcessor, reportingPanel);
+        AdminPanel adminPanel = new AdminPanel(exitService, store);
 
         // --- Header Setup ---
         JPanel headerPanel = new JPanel(new BorderLayout());
@@ -46,7 +44,7 @@ public class MainFrame extends JFrame {
         JButton logoutBtn = new JButton("Logout");
         logoutBtn.addActionListener(e -> {
             this.dispose();
-            app.Main.main(null); 
+            app.main.main(null); 
         });
 
         rightHeaderPanel.add(userLabel);

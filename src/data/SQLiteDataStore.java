@@ -1,18 +1,21 @@
 package data;
 
-import java.sql.*;
-import java.util.List;
-import java.util.ArrayList;
-import model.FineRecord;
-import model.ParkingSpot;
-import model.ParkingSession;
-import model.PaymentRecord;
-import enums.SpotType;
+import enums.FineReason;
 import enums.SpotStatus;
+import enums.SpotType;
+import java.sql.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import model.FineRecord;
+import model.ParkingSession;
+import model.ParkingSpot;
+import model.PaymentRecord;
+import model.Vehicle;
 
 public class SQLiteDataStore implements DataStore {
 
-    // 1. Database Configuration
     private static final String DB_URL = "jdbc:sqlite:parking.db";
     private Connection conn;
 
@@ -20,17 +23,29 @@ public class SQLiteDataStore implements DataStore {
     public void connect() {
         try {
             this.conn = DriverManager.getConnection(DB_URL);
-            if (this.conn != null) {
-                System.out.println("Connected to parking.db");
-            }
+            if (this.conn != null) System.out.println("Connected to parking.db");
         } catch (SQLException e) {
             System.err.println("Connection failed: " + e.getMessage());
         }
     }
 
     @Override
+    public void close() {
+        try { if (conn != null) conn.close(); } catch (SQLException e) { e.printStackTrace(); }
+    }
+
+    @Override
     public void initSchema() {
         String[] tables = {
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR(50) NOT NULL UNIQUE,
+                password VARCHAR(50) NOT NULL,
+                role VARCHAR(20) NOT NULL
+            );
+                   
+            """,
             """
             CREATE TABLE IF NOT EXISTS parking_spot (
                 spot_id TEXT PRIMARY KEY,
@@ -46,6 +61,9 @@ public class SQLiteDataStore implements DataStore {
                 ticket_no TEXT UNIQUE NOT NULL,
                 plate TEXT NOT NULL,
                 spot_id TEXT NOT NULL,
+                vehicle_type TEXT,
+                has_hc_card INTEGER,
+                is_vip INTEGER,
                 entry_time TEXT NOT NULL,
                 exit_time TEXT,
                 duration_hours INTEGER,
@@ -79,26 +97,45 @@ public class SQLiteDataStore implements DataStore {
             );
             """,
             """
-            CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                password TEXT NOT NULL,
-                role TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS config (
+                key VARCHAR(50) PRIMARY KEY,
+                value VARCHAR(100)
             );
-            """
+            """,
         };
 
         try (Statement stmt = conn.createStatement()) {
-            for (String sql : tables) {
-                stmt.execute(sql);
-            }
+            for (String sql : tables) stmt.execute(sql);
             System.out.println("Database tables ready.");
+        } catch (SQLException e) { e.printStackTrace(); }
+    }
+
+    @Override
+    public void setActiveFineScheme(String scheme) {
+        String sql = "INSERT INTO config(key, value) VALUES('active_fine_scheme', ?) " +
+                    "ON CONFLICT(key) DO UPDATE SET value = ?;";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, scheme);
+            stmt.setString(2, scheme);
+            stmt.executeUpdate();
         } catch (SQLException e) {
             e.printStackTrace();
         }
     }
 
-    // --- Spot Management ---
+    @Override
+    public String getActiveFineScheme() {
+        String sql = "SELECT value FROM config WHERE key='active_fine_scheme';";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) return rs.getString("value");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return "Fixed Fine (RM 50)"; // default fallback
+    }
 
+
+    // --- Spot Management ---
     @Override
     public void upsertSpot(ParkingSpot spot) {
         String sql = "INSERT OR REPLACE INTO parking_spot (spot_id, spot_type, status, hourly_rate, current_plate) VALUES (?, ?, ?, ?, ?);";
@@ -137,7 +174,9 @@ public class SQLiteDataStore implements DataStore {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     SpotType spotType = SpotType.valueOf(rs.getString("spot_type").toUpperCase());
-                    result.add(new ParkingSpot(rs.getString("spot_id"), spotType));
+                    ParkingSpot spot = new ParkingSpot(rs.getString("spot_id"), spotType);
+                    spot.setStatus(SpotStatus.AVAILABLE);
+                    result.add(spot);
                 }
             }
         } catch (SQLException e) { e.printStackTrace(); }
@@ -163,67 +202,312 @@ public class SQLiteDataStore implements DataStore {
         } catch (SQLException e) { e.printStackTrace(); }
     }
 
-    // --- Session & Payment ---
-
+    // --- Session Management ---
+    // --- Create new session ---
     @Override
     public void createSession(ParkingSession session) {
         String sql = "INSERT INTO parking_session (ticket_no, plate, spot_id, entry_time) VALUES (?, ?, ?, ?);";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, session.getTicketNo());
-            stmt.setString(2, session.getPlate());
+            stmt.setString(2, session.getPlate());         // plate from Vehicle
             stmt.setString(3, session.getSpotId());
             stmt.setString(4, session.getEntryTime());
             stmt.executeUpdate();
-        } catch (SQLException e) { e.printStackTrace(); }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
 
+    // --- Get open session by plate ---
+    @Override
+    public ParkingSession getOpenSessionByPlate(String plate) {
+
+        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL LIMIT 1;";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, plate);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                if (rs.next()) {
+
+                    // Create vehicle with minimal info
+                    Vehicle vehicle = new Vehicle(
+                            rs.getString("plate"),
+                            "UNKNOWN",   // since not stored
+                            false,       // no HC info in session table
+                            false        // no VIP info in session table
+                    );
+
+                    return new ParkingSession(
+                        rs.getString("ticket_no"),
+                        vehicle,
+                        rs.getString("spot_id"),
+                        rs.getString("entry_time"),
+                        rs.getString("fine_scheme") // make sure your DB table has this column
+                    );
+                }
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+
+    // --- Get all active sessions ---
     @Override
     public List<ParkingSession> getAllActiveSessions() {
+
         List<ParkingSession> sessions = new ArrayList<>();
-        String sql = "SELECT * FROM parking_session WHERE exit_time IS NULL";
-        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+
+        String sql = "SELECT * FROM parking_session WHERE exit_time IS NULL;";
+
+        try (Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(sql)) {
+
             while (rs.next()) {
+
+                // Since vehicle details are NOT stored in DB,
+                // we reconstruct with default values
+                Vehicle vehicle = new Vehicle(
+                        rs.getString("plate"),
+                        "UNKNOWN",   // vehicle_type not stored
+                        false,       // has_hc_card not stored
+                        false        // is_vip not stored
+                );
+
                 sessions.add(new ParkingSession(
-                    rs.getString("ticket_no"),
-                    rs.getString("plate"),
-                    rs.getString("spot_id"),
-                    rs.getString("entry_time")
+                        rs.getString("ticket_no"),
+                        vehicle,
+                        rs.getString("spot_id"),
+                        rs.getString("entry_time"),
+                        rs.getString("fine_scheme")
                 ));
             }
-        } catch (SQLException e) { e.printStackTrace(); }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
         return sessions;
     }
 
+
+    // --- Close session ---
     @Override
-    public void closeSession(String ticketNo, String exitTime, int hours, double fee) {
+    public void closeSession(String ticketNo, String exitTimeISO, int durationHours, double parkingFee) {
         String sql = "UPDATE parking_session SET exit_time = ?, duration_hours = ?, parking_fee = ? WHERE ticket_no = ?;";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, exitTime);
-            stmt.setInt(2, hours);
-            stmt.setDouble(3, fee);
+            stmt.setString(1, exitTimeISO);
+            stmt.setInt(2, durationHours);
+            stmt.setDouble(3, parkingFee);
             stmt.setString(4, ticketNo);
             stmt.executeUpdate();
             System.out.println("Session " + ticketNo + " closed successfully.");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    // --- Fine Management ---
+    @Override
+    public void addFine(FineRecord fine) {
+        String sql = "INSERT INTO fine (plate, reason, amount, issued_at, paid) VALUES (?, ?, ?, ?, ?);";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, fine.getPlate());
+            stmt.setString(2, fine.getType().name());  // store enum name
+            stmt.setDouble(3, fine.getAmount());
+            stmt.setString(4, fine.getIssuedTime());
+            stmt.setInt(5, fine.isPaid() ? 1 : 0);
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public List<FineRecord> getUnpaidFinesByPlate(String plate) {
+        List<FineRecord> fines = new ArrayList<>();
+        String sql = "SELECT * FROM fine WHERE plate = ? AND paid = 0;";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, plate);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    FineReason reason = FineReason.valueOf(rs.getString("reason"));
+                    fines.add(new FineRecord(
+                            rs.getInt("fine_id"),
+                            rs.getString("plate"),
+                            reason,
+                            rs.getDouble("amount"),
+                            rs.getString("issued_at"),
+                            rs.getInt("paid") != 0,
+                            rs.getString("paid_at")
+                    ));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return fines;
+    }
+
+    @Override
+    public void markAllFinesPaid(String plate, String paidTimeISO) {
+        String sql = "UPDATE fine SET paid = 1, paid_at = ? WHERE plate = ? AND paid = 0;";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, paidTimeISO);
+            stmt.setString(2, plate);
+            stmt.executeUpdate();
         } catch (SQLException e) { e.printStackTrace(); }
     }
 
-    // --- Admin Stats ---
+    @Override
+    public void reduceFineAmount(FineRecord fine, double amount) {
+
+        // First update the object
+        fine.reduceAmount(amount);
+
+        boolean fullyPaid = fine.getAmount() <= 0;
+
+        String sql = "UPDATE fine SET amount = ?, paid = ?, paid_at = ? WHERE fine_id = ?;";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setDouble(1, fine.getAmount());
+            stmt.setInt(2, fullyPaid ? 1 : 0);
+            stmt.setString(3,
+                    fullyPaid ? java.time.LocalDateTime.now().toString()
+                            : fine.getPaidAt());
+
+            stmt.setInt(4, fine.getId());
+
+            stmt.executeUpdate();
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    // --- Payment Management ---
+    @Override
+    public void createPayment(PaymentRecord payment) {
+        String sql = """
+            INSERT INTO payment
+            (ticket_no, plate, method, paid_time, parking_fee, fine_paid, total_due, amount_paid, balance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, payment.getTicketNo());
+            stmt.setString(2, payment.getPlate());
+            
+            // Convert enum to String
+            stmt.setString(3, payment.getMethod().name());
+            
+            // Convert LocalDateTime to string in SQL format
+            stmt.setString(4, payment.getPaidTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            
+            stmt.setDouble(5, payment.getParkingFee());
+            stmt.setDouble(6, payment.getFinePaid());
+            stmt.setDouble(7, payment.getTotalDue());
+            stmt.setDouble(8, payment.getAmountPaid());
+            stmt.setDouble(9, payment.getBalance());
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
 
     @Override
+    public List<FineRecord> getAllUnpaidFines() {
+        List<FineRecord> fines = new ArrayList<>();
+        String sql = "SELECT * FROM fine WHERE paid = 0;";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                FineReason reason = FineReason.valueOf(rs.getString("reason"));
+                fines.add(new FineRecord(
+                        rs.getInt("fine_id"),
+                        rs.getString("plate"),
+                        reason,
+                        rs.getDouble("amount"),
+                        rs.getString("issued_at"),
+                        rs.getInt("paid") != 0,
+                        rs.getString("paid_at")
+                ));
+            }
+        } catch (SQLException e) { e.printStackTrace(); }
+        return fines;
+    }
+
+    @Override
+    public List<PaymentRecord> getPaymentsByTicket(String ticketNo) {
+
+        List<PaymentRecord> payments = new ArrayList<>();
+
+        String sql = "SELECT * FROM payment WHERE ticket_no = ?;";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, ticketNo);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                while (rs.next()) {
+
+                    PaymentRecord record = new PaymentRecord(
+                            rs.getString("ticket_no"),
+                            rs.getString("plate"),
+                            enums.PaymentMethod.valueOf(rs.getString("method")),
+                            LocalDateTime.parse(
+                                    rs.getString("paid_time"),
+                                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                            ),
+                            0, // duration (not stored in payment table)
+                            rs.getDouble("parking_fee"),
+                            rs.getDouble("fine_paid"),
+                            rs.getDouble("amount_paid")
+                    );
+
+                    payments.add(record);
+                }
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return payments;
+    }
+
+
+    // --- Admin Stats ---
+    @Override
     public double getTotalRevenue() {
-        String sql = "SELECT SUM(amount_paid) FROM payment";
-        return executeScalarDouble(sql);
+        String sql = "SELECT SUM(amount_paid) FROM payment;";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) return rs.getDouble(1);
+        } catch (SQLException e) { e.printStackTrace(); }
+        return 0.0;
     }
 
     @Override
     public double getTotalUnpaidFines() {
-        String sql = "SELECT SUM(amount) FROM fine WHERE paid = 0";
-        return executeScalarDouble(sql);
+        String sql = "SELECT SUM(amount) FROM fine WHERE paid = 0;";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) return rs.getDouble(1);
+        } catch (SQLException e) { e.printStackTrace(); }
+        return 0.0;
     }
 
     @Override
     public int getOccupiedSpotCount() {
-        String sql = "SELECT COUNT(*) FROM parking_spot WHERE status = 'OCCUPIED'";
+        String sql = "SELECT COUNT(*) FROM parking_spot WHERE status = 'OCCUPIED';";
         try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
             if (rs.next()) return rs.getInt(1);
         } catch (SQLException e) { e.printStackTrace(); }
@@ -232,91 +516,30 @@ public class SQLiteDataStore implements DataStore {
 
     @Override
     public int getTotalSpotCount() {
-        String sql = "SELECT COUNT(*) FROM parking_spot";
+        String sql = "SELECT COUNT(*) FROM parking_spot;";
         try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
             if (rs.next()) return rs.getInt(1);
         } catch (SQLException e) { e.printStackTrace(); }
         return 0;
     }
 
-    private double executeScalarDouble(String sql) {
-        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) return rs.getDouble(1);
-        } catch (SQLException e) { e.printStackTrace(); }
-        return 0.0;
-    }
-
-    // --- Auth & Generic ---
-
+    // --- Auth ---
     @Override
     public String authenticate(String username, String password) {
-        String sql = "SELECT role FROM users WHERE username = ? AND password = ?";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, username);
-            pstmt.setString(2, password);
-            try (ResultSet rs = pstmt.executeQuery()) {
+        String sql = "SELECT role FROM users WHERE username = ? AND password = ?;";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, username);
+            stmt.setString(2, password);
+            try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) return rs.getString("role");
             }
         } catch (SQLException e) { e.printStackTrace(); }
         return null;
     }
 
-    @Override
-    public void close() {
-        try { if (conn != null) conn.close(); } catch (SQLException e) { e.printStackTrace(); }
-    }
 
     // Boilerplate for interface compatibility
     @Override public List<model.ParkingSpot> getAvailableSpots(String type) { return findAvailableSpots(type); }
 
-    @Override public model.ParkingSession getOpenSessionByPlate(String p) {
-        String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, p);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return new model.ParkingSession(
-                        rs.getString("ticket_no"),
-                        rs.getString("plate"),
-                        rs.getString("spot_id"),
-                        rs.getString("entry_time")
-                    );
-                }
-            }
-        } catch (SQLException e) { e.printStackTrace(); }
-        return null;
-    }
 
-    @Override public void addFine(FineRecord f) {
-        String sql = "INSERT INTO fine (plate, reason, amount, issued_at, paid) VALUES (?, ?, ?, ?, 0)";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, f.getPlate());
-            pstmt.setString(2, f.getReason());
-            pstmt.setDouble(3, f.getAmount());
-            pstmt.setString(4, f.getIssuedAt());
-            pstmt.executeUpdate();
-        } catch (SQLException e) { e.printStackTrace(); }
-    }
-    @Override public List<FineRecord> getUnpaidFinesByPlate(String p) {
-        List<FineRecord> fines = new ArrayList<>();
-        String sql = "SELECT * FROM fine WHERE plate = ? AND paid = 0";
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, p);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                while (rs.next()) {
-                    fines.add(new FineRecord(
-                        rs.getString("plate"),
-                        rs.getString("reason"),
-                        rs.getDouble("amount"),
-                        rs.getString("issued_at"),
-                        false
-                    ));
-                }
-            }
-        }catch (SQLException e) { e.printStackTrace(); }
-        return fines;
-    }
-    @Override public List<FineRecord> getAllUnpaidFines() { return new ArrayList<>(); }
-    @Override public void markAllFinesPaid(String p, String t) {}
-    @Override public void createPayment(PaymentRecord p) {}
 }

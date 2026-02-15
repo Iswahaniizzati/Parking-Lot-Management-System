@@ -3,25 +3,20 @@ package fine;
 public class ProgressiveFineScheme implements FineScheme {
     @Override
     public double calculateFine(long overstayHours) {
+
         if (overstayHours <= 0) return 0.0;
-        
-        double totalFine = 50.0; // First 24 hours of overstay (Hours 0-24)
-        
-        if (overstayHours > 24) {
-            totalFine += 100.0; // Hours 24-48
-        }
-        if (overstayHours > 48) {
-            totalFine += 150.0; // Hours 48-72
-        }
-        if (overstayHours > 72) {
-            totalFine += 200.0; // Above 72 hours
-        }
-        
-        return totalFine;
+
+        double fine = 0;
+
+        if (overstayHours > 0) fine += 50;        // 0–24 overstay
+        if (overstayHours > 24) fine += 100;      // 24–48 overstay
+        if (overstayHours > 48) fine += 150;      // 48–72 overstay
+        if (overstayHours > 72) fine += 200;      // >72 overstay
+
+        return fine;
     }
 
+
     @Override
-    public String getSchemeName() {
-        return "Progressive Fine (Tiered)";
-    }
+    public String getSchemeName() { return "Progressive Fine Scheme"; }
 }
