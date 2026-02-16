@@ -13,6 +13,7 @@ import model.ParkingSession;
 import model.ParkingSpot;
 import model.PaymentRecord;
 import model.Vehicle;
+import java.util.Map;
 
 public class SQLiteDataStore implements DataStore {
 
@@ -643,5 +644,15 @@ public class SQLiteDataStore implements DataStore {
     // Boilerplate for interface compatibility
     @Override public List<model.ParkingSpot> getAvailableSpots(String type) { return findAvailableSpots(type); }
 
-
+@Override
+public Map<String, ParkingSession> getOccupiedSpotsMap() {
+    java.util.Map<String, ParkingSession> map = new java.util.HashMap<>();
+    // We reuse your existing method to get active sessions
+    List<ParkingSession> activeSessions = getAllActiveSessions();
+    
+    for (ParkingSession session : activeSessions) {
+        map.put(session.getSpotId(), session);
+    }
+    return map;
+}
 }

@@ -50,15 +50,19 @@ public class MainFrame extends JFrame {
         headerPanel.add(rightHeaderPanel, BorderLayout.EAST);
         add(headerPanel, BorderLayout.NORTH);
 
-        // --- Tabs Setup ---
+ // --- Tabs Setup ---
         JTabbedPane tabbedPane = new JTabbedPane();
-        tabbedPane.addTab("Vehicle Entry", entryPanel);
-        tabbedPane.addTab("Vehicle Exit", exitPanel);
 
         if (role.equalsIgnoreCase("Admin")) {
+            // Admin only sees these two
             tabbedPane.addTab("Admin Dashboard", adminPanel);
             tabbedPane.addTab("Live Reports", reportingPanel);
+        } else {
+            // Staff/Others only see these two
+            tabbedPane.addTab("Vehicle Entry", entryPanel);
+            tabbedPane.addTab("Vehicle Exit", exitPanel);
         }
+        
         add(tabbedPane, BorderLayout.CENTER);
 
         // --- FIXED: Tab Change Listener ---
