@@ -28,15 +28,26 @@ public class EntryService {
 
         if (spot == null) return null;
 
+        // Debug: check incoming vehicle
+        System.out.println("[ENTRY SERVICE DEBUG] Incoming vehicle:");
+        System.out.println("  Plate: " + vehicle.getPlate());
+        System.out.println("  Type: " + vehicle.getType());
+        System.out.println("  HC card: " + vehicle.hasHcCard());
+        System.out.println("  VIP: " + vehicle.isVIP());
+
         // Check spot suitability
         if (!isSpotSuitable(vehicle, spot.getType().toString())) return null;
 
-        // Get active fine scheme from DataStore
-        String fineScheme = dataStore.getActiveFineScheme();  // <- new
+        String fineScheme = dataStore.getActiveFineScheme();
 
-        // Save session
         String entryTime = LocalDateTime.now().format(ENTRY_FORMAT);
         ParkingSession session = new ParkingSession(ticketNo, vehicle, spotId, entryTime, fineScheme);
+
+        // Debug: check session's vehicle after creation
+        System.out.println("[ENTRY SERVICE DEBUG] Session vehicle after creation:");
+        System.out.println("  Type: " + session.getVehicle().getType());
+        System.out.println("  HC card: " + session.getVehicle().hasHcCard());
+
         dataStore.createSession(session);
         dataStore.setSpotOccupied(spotId, vehicle.getPlate());
 

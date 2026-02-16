@@ -87,14 +87,26 @@ public class ExitPanel extends JPanel {
 
         try {
             LocalDateTime exitTime = LocalDateTime.parse(exitText);
+            
+            System.out.println("[DEBUG EXIT] Looking for plate: " + plate);
             currentSession = store.getOpenSessionByPlate(plate);
 
             if (currentSession == null) {
+                System.out.println("[DEBUG EXIT] Session NOT found for plate: " + plate);
+                // Add more info if possible
+                System.out.println("[DEBUG EXIT] All active sessions: " + store.getAllActiveSessions().size());
+                store.getAllActiveSessions().forEach(s -> 
+                    System.out.println("  - Plate: " + s.getPlate() + ", Spot: " + s.getSpotId() + ", VIP: " + s.getVehicle().isVIP()));
+                
                 JOptionPane.showMessageDialog(this, "Vehicle not found or already exited!");
                 receiptArea.setText("");
                 processBtn.setEnabled(false);
                 return;
             }
+
+            System.out.println("[DEBUG EXIT] Session found! Spot: " + currentSession.getSpotId() + 
+                            ", VIP: " + currentSession.getVehicle().isVIP() + 
+                            ", Entry: " + currentSession.getEntryTime());
 
             previewRecord = exitService.previewExit(currentSession, exitTime);
             if (previewRecord != null) {
@@ -106,7 +118,7 @@ public class ExitPanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Invalid time format! Use yyyy-MM-ddTHH:mm");
         }
     }
-
+    
     private void initCenterPanel() {
         JPanel centerPanel = new JPanel(new BorderLayout(15, 0));
         listModel = new DefaultListModel<>();
@@ -242,15 +254,32 @@ public class ExitPanel extends JPanel {
                         totalPaid
                 );
 
-                exitService.confirmExit(currentSession, exitTime, payment, false);
+                // Confirm the exit and get the finalized payment record
+                PaymentRecord finalized = exitService.confirmExit(currentSession, exitTime, payment, false);
 
-                JOptionPane.showMessageDialog(dialog, "Payment & Exit Successful!");
+                // Show the FINAL receipt immediately
+                displayReceipt(finalized);
+
+                // Nice message to the user
+                JOptionPane.showMessageDialog(dialog, 
+                    "Payment & Exit Successful!\nFinal receipt is now displayed in the main area.");
+
                 dialog.dispose();
 
                 refreshVehiclesInside();
                 if (adminPanel != null) adminPanel.refreshStats();
                 if (reportingPanel != null) reportingPanel.refreshStats();
-                resetPanel();
+
+                // Reset ONLY input fields — KEEP the receipt visible
+                plateField.setText("");
+                hcCheckBox.setSelected(false);
+                exitTimeField.setText(LocalDateTime.now().format(DISPLAY_FORMAT));
+                processBtn.setEnabled(false);
+
+                currentSession = null;
+                previewRecord = null;
+
+                // DO NOT call resetPanel() here — it would clear the receipt
 
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(dialog, "Invalid amount entered!");
@@ -263,57 +292,118 @@ public class ExitPanel extends JPanel {
     }
 
     private void displayReceipt(PaymentRecord record) {
-        String plate = record.getPlate();
-        ParkingSession session = store.getOpenSessionByPlate(plate);
+        boolean isPreview = record.getMethod() == null || record.getAmountPaid() == 0;
 
+        String plate = record.getPlate();
+
+        // Current unpaid fines from database (most accurate)
         List<FineRecord> unpaidFines = store.getUnpaidFinesByPlate(plate);
-        List<FineRecord> sessionFines = new ArrayList<>();
-        if (session != null) {
-            long hours = record.getDurationHours();
-            sessionFines = exitService.getActiveFineScheme() != null ?
-                    exitService.generateFinalFines(session, hours,
-                            record.getPaidTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-                            exitService.getActiveFineScheme()) :
-                    new ArrayList<>();
+        double pastUnpaidTotal = unpaidFines.stream().mapToDouble(FineRecord::getAmount).sum();
+
+        // For preview: calculate only NEW fines for this session
+        double estimatedNewFines = 0.0;
+        if (isPreview && record.getFinePaid() > 0) {
+            estimatedNewFines = record.getFinePaid() - pastUnpaidTotal;
+            // Prevent negative due to timing/rounding issues
+            if (estimatedNewFines < 0) estimatedNewFines = 0.0;
         }
 
-        List<FineRecord> allFines = new ArrayList<>();
-        allFines.addAll(unpaidFines);
-        allFines.addAll(sessionFines);
-
-        double totalFines = allFines.stream().mapToDouble(FineRecord::getAmount).sum();
-        double remainingFines = Math.max(0, totalFines - record.getFinePaid());
+        // Entry time
+        String entryTimeStr = currentSession != null ? currentSession.getEntryTime() : "N/A";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("========= PARKING RECEIPT =========\n");
-        sb.append("Ticket No:      ").append(record.getTicketNo()).append("\n");
-        sb.append("Plate:          ").append(record.getPlate()).append("\n");
-        sb.append("Exit Time:      ").append(record.getPaidTime()).append("\n");
-        sb.append("-----------------------------------\n");
-        sb.append("Parking Fee:    RM ").append(String.format("%.2f", record.getParkingFee())).append("\n");
-        sb.append("Fines Paid:     RM ").append(String.format("%.2f", record.getFinePaid())).append("\n");
-        sb.append("Remaining Fines: RM ").append(String.format("%.2f", remainingFines)).append("\n");
-        sb.append("TOTAL DUE:      RM ").append(String.format("%.2f", record.getAmountPaid())).append("\n");
-        sb.append("-----------------------------------\n");
-        sb.append("Payment Method: ").append(record.getMethod()).append("\n");
-        sb.append("Amount Paid:    RM ").append(String.format("%.2f", record.getAmountPaid())).append("\n");
-        sb.append("Balance/Change: RM ").append(String.format("%.2f", record.getBalance())).append("\n");
-        sb.append("===================================\n");
+
+        // Header
+        if (isPreview) {
+            sb.append("========= PARKING RECEIPT (PREVIEW) =========\n");
+            sb.append("     Please review before payment      \n");
+        } else {
+            sb.append("===== FINAL PAYMENT RECEIPT =====\n");
+            sb.append("         EXIT COMPLETED         \n");
+        }
+
+        sb.append("Ticket No     : ").append(record.getTicketNo()).append("\n");
+        sb.append("Plate         : ").append(plate).append("\n");
+        sb.append("Entry Time    : ").append(entryTimeStr).append("\n");
+        sb.append("Exit Time     : ").append(record.getPaidTime().format(DISPLAY_FORMAT)).append("\n");
+        sb.append("Duration      : ").append(record.getDurationHours()).append(" hours\n");
+        sb.append("--------------------------------------------\n");
+
+        // Parking fee
+        sb.append("Parking Fee           RM ").append(String.format("%8.2f", record.getParkingFee())).append("\n");
+
+        // Fines section
+        if (isPreview) {
+            sb.append("Estimated New Fines   RM ").append(String.format("%8.2f", estimatedNewFines)).append("\n");
+            sb.append("  └─ Overstay / Reserved violation this stay\n");
+
+            if (pastUnpaidTotal > 0) {
+                sb.append("Past Unpaid Fines     RM ").append(String.format("%8.2f", pastUnpaidTotal)).append("\n");
+                sb.append("  └─ From previous visits - must be settled\n");
+            }
+
+            double totalDue = record.getParkingFee() + estimatedNewFines + pastUnpaidTotal;
+            sb.append("--------------------------------------------\n");
+            sb.append("TOTAL TO PAY NOW      RM ").append(String.format("%8.2f", totalDue)).append("\n");
+        } else {
+            // Final receipt
+            sb.append("Fines Paid This Time  RM ").append(String.format("%8.2f", record.getFinePaid())).append("\n");
+            sb.append("  └─ Applied to current stay fines\n");
+
+            if (pastUnpaidTotal > 0) {
+                sb.append("Still Unpaid Fines    RM ").append(String.format("%8.2f", pastUnpaidTotal)).append("\n");
+                sb.append("  Breakdown of remaining:\n");
+                for (FineRecord f : unpaidFines) {
+                    sb.append("     • ").append(String.format("%-20s", f.getReason().name()))
+                    .append(" RM ").append(String.format("%6.2f", f.getAmount()))
+                    .append("  (").append(f.getPaidAt() != null ? f.getPaidAt() : "—").append(")\n");
+                }
+            } else {
+                sb.append("All fines cleared     RM 0.00\n");
+            }
+
+            sb.append("--------------------------------------------\n");
+            sb.append("Total Amount Paid     RM ").append(String.format("%8.2f", record.getAmountPaid())).append("\n");
+
+            double change = record.getAmountPaid() - (record.getParkingFee() + record.getFinePaid());
+            if (change > 0) {
+                sb.append("Change Returned       RM ").append(String.format("%8.2f", change)).append("\n");
+            } else if (change < 0) {
+                sb.append("Still Owing           RM ").append(String.format("%8.2f", -change)).append("\n");
+            } else {
+                sb.append("Exact payment - no change\n");
+            }
+        }
+
+        sb.append("--------------------------------------------\n");
+        sb.append("Payment Method: ").append(record.getMethod() != null ? record.getMethod() : "Not yet paid").append("\n");
+        sb.append("============================================\n");
+
+        if (!isPreview) {
+            sb.append("       Thank you - Drive Safely!       \n");
+        }
 
         receiptArea.setText(sb.toString());
     }
 
     public void refreshVehiclesInside() {
         listModel.clear();
-        store.getAllActiveSessions().forEach(session ->
-                listModel.addElement(session.getPlate() + " (" + session.getSpotId() + ")")
-        );
+        
+        List<ParkingSession> active = store.getAllActiveSessions();
+        System.out.println("[EXIT LIST DEBUG] Number of active sessions returned: " + active.size());
+        
+        active.forEach(session -> {
+            String line = session.getPlate() + " (" + session.getSpotId() + ")";
+            listModel.addElement(line);
+            System.out.println("[EXIT LIST DEBUG] Added: " + line + " | VIP: " + session.getVehicle().isVIP());
+        });
+
         double totalRev = store.getTotalRevenue();
         revenueLabel.setText(String.format("Total Revenue: RM %.2f", totalRev));
     }
 
     private void resetPanel() {
-        receiptArea.setText("");
+        //receiptArea.setText("");
         plateField.setText("");
         hcCheckBox.setSelected(false);
         exitTimeField.setText(LocalDateTime.now().format(DISPLAY_FORMAT));

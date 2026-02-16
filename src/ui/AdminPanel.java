@@ -3,6 +3,7 @@ package ui;
 import data.DataStore;
 import java.awt.*;
 import javax.swing.*;
+import model.ParkingSession;
 import service.ExitService;
 
 public class AdminPanel extends JPanel {
@@ -10,38 +11,60 @@ public class AdminPanel extends JPanel {
     private final ExitService exitService;
     private final DataStore store;
 
-    // UI Components that need updating
+    // UI Components
     private JLabel lblOccupancy, lblRevenue, lblUnpaidFines;
     private DefaultListModel<String> vehiclesListModel;
     private JComboBox<String> schemeDropdown;
+    private JPanel floorsContainer; // Container for the floor maps
 
     public AdminPanel(ExitService exitService, DataStore store) {
         this.exitService = exitService;
         this.store = store;
 
-        // Modern layout styling
         setLayout(new BorderLayout(15, 15));
         setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
         initComponents();
-        refreshStats(); // Initial data load
+        refreshStats(); 
     }
 
     private void initComponents() {
         initTopStats();
-        initCenterPanel();
+        
+        // Main Dashboard Split: Left (List/Config) | Right (Floor Map)
+        JPanel mainContent = new JPanel(new GridLayout(1, 2, 20, 0));
+        
+        // --- Left Side: Existing List and Config ---
+        JPanel leftSide = new JPanel(new GridLayout(2, 1, 0, 20));
+        
+        vehiclesListModel = new DefaultListModel<>();
+        JList<String> vehiclesList = new JList<>(vehiclesListModel);
+        vehiclesList.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        JScrollPane vehicleScroll = new JScrollPane(vehiclesList);
+        vehicleScroll.setBorder(BorderFactory.createTitledBorder("Vehicles Currently Parked"));
+        leftSide.add(vehicleScroll);
+
+        JPanel finePanel = new JPanel(new GridBagLayout());
+        finePanel.setBorder(BorderFactory.createTitledBorder("System Configuration"));
+        initFineConfig(finePanel);
+        leftSide.add(finePanel);
+
+        // --- Right Side: Floor Map View ---
+        floorsContainer = new JPanel(new BorderLayout());
+        floorsContainer.setBorder(BorderFactory.createTitledBorder("Parking Floor Map (Real-Time)"));
+        
+        mainContent.add(leftSide);
+        mainContent.add(floorsContainer);
+
+        add(mainContent, BorderLayout.CENTER);
         initBottomPanel();
     }
 
-    // ---------------- TOP STATS CARDS ----------------
     private void initTopStats() {
         JPanel statsPanel = new JPanel(new GridLayout(1, 3, 20, 0));
-
-        // Create cards with specific colors for visual distinction
-        lblOccupancy = createStatCard(statsPanel, "Occupancy Rate", "0/0 (0%)", new Color(52, 152, 219));
+        lblOccupancy = createStatCard(statsPanel, "Occupancy Rate", "0/60 (0%)", new Color(52, 152, 219));
         lblRevenue = createStatCard(statsPanel, "Total Revenue", "RM 0.00", new Color(46, 204, 113));
         lblUnpaidFines = createStatCard(statsPanel, "Unpaid Fines", "RM 0.00", new Color(231, 76, 60));
-
         add(statsPanel, BorderLayout.NORTH);
     }
 
@@ -64,26 +87,10 @@ public class AdminPanel extends JPanel {
         card.add(titleLabel, BorderLayout.NORTH);
         card.add(valLabel, BorderLayout.CENTER);
         parent.add(card);
-
         return valLabel;
     }
 
-    // ---------------- CENTER DASHBOARD ----------------
-    private void initCenterPanel() {
-        JPanel centerPanel = new JPanel(new GridLayout(1, 2, 20, 0));
-
-        // --- Vehicle List Side ---
-        vehiclesListModel = new DefaultListModel<>();
-        JList<String> vehiclesList = new JList<>(vehiclesListModel);
-        vehiclesList.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        
-        JScrollPane vehicleScroll = new JScrollPane(vehiclesList);
-        vehicleScroll.setBorder(BorderFactory.createTitledBorder("Vehicles Currently Parked"));
-        centerPanel.add(vehicleScroll);
-
-        // --- Fine Configuration Side ---
-        JPanel finePanel = new JPanel(new GridBagLayout());
-        finePanel.setBorder(BorderFactory.createTitledBorder("System Configuration"));
+    private void initFineConfig(JPanel finePanel) {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(10, 10, 10, 10);
         gbc.fill = GridBagConstraints.HORIZONTAL;
@@ -93,15 +100,7 @@ public class AdminPanel extends JPanel {
 
         String[] options = {"Fixed Fine (RM 50)", "Progressive (Tiered)", "Hourly (RM 20/hr)"};
         schemeDropdown = new JComboBox<>(options);
-        
-        // ─── IMPORTANT: Load and pre-select the current active scheme ───
-        String currentScheme = store.getActiveFineScheme();
-        schemeDropdown.setSelectedItem(currentScheme);
-        
-        // Safety fallback: if the stored value isn't in the list (e.g. corrupted data), select first
-        if (schemeDropdown.getSelectedIndex() == -1) {
-            schemeDropdown.setSelectedIndex(0);
-        }
+        schemeDropdown.setSelectedItem(store.getActiveFineScheme());
         
         gbc.gridx = 1;
         finePanel.add(schemeDropdown, gbc);
@@ -115,17 +114,63 @@ public class AdminPanel extends JPanel {
         btnApply.addActionListener(e -> {
             String scheme = (String) schemeDropdown.getSelectedItem();
             store.setActiveFineScheme(scheme);
-            JOptionPane.showMessageDialog(this, 
-                "Fine policy updated for future records.\n\n" +
-                "Active policy is now: " + scheme);
+            JOptionPane.showMessageDialog(this, "Fine policy updated to: " + scheme);
             refreshStats();
         });
-
-        centerPanel.add(finePanel);
-        add(centerPanel, BorderLayout.CENTER);
     }
 
-    // ---------------- BOTTOM ACTIONS ----------------
+    private void renderFloorMap() {
+        floorsContainer.removeAll();
+        JTabbedPane floorTabs = new JTabbedPane();
+
+        java.util.Map<String, ParkingSession> activeSessions = store.getOccupiedSpotsMap(); 
+        java.util.List<model.ParkingSpot> allSpots = store.getAllSpots();
+
+        for (int f = 1; f <= 3; f++) {
+            JPanel floorGrid = new JPanel(new GridLayout(0, 5, 10, 10));
+            floorGrid.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+            floorGrid.setBackground(Color.WHITE);
+
+            final String floorPrefix = "F" + f;
+            
+            allSpots.stream()
+                .filter(s -> s.getSpotId().startsWith(floorPrefix)) // Changed getId() to getSpotId()
+                .forEach(spot -> {
+                    String id = spot.getSpotId(); // Using getSpotId()
+                    boolean isOccupied = activeSessions.containsKey(id);
+                    
+                    // Handling SpotType enum: convert to string before substring
+                    String typeStr = spot.getType().toString(); 
+                    String statusText = isOccupied ? id + "OC..." : id + " (" + typeStr.substring(0,2) + "...)";
+                    
+                    JLabel spotLabel = new JLabel(statusText, SwingConstants.CENTER);
+                    spotLabel.setOpaque(true);
+                    spotLabel.setFont(new Font("SansSerif", Font.BOLD, 11));
+                    spotLabel.setPreferredSize(new Dimension(110, 60));
+                    spotLabel.setBorder(BorderFactory.createLineBorder(Color.LIGHT_GRAY));
+
+                    if (isOccupied) {
+                        spotLabel.setBackground(new Color(231, 76, 60)); // Red
+                        spotLabel.setForeground(Color.WHITE);
+                        spotLabel.setToolTipText("Occupied by: " + activeSessions.get(id).getPlate());
+                    } else {
+                        spotLabel.setBackground(new Color(46, 204, 113)); // Green
+                        spotLabel.setForeground(Color.BLACK);
+                        spotLabel.setToolTipText("Available (" + typeStr + ")");
+                    }
+
+                    floorGrid.add(spotLabel);
+                });
+
+            JScrollPane floorScroll = new JScrollPane(floorGrid);
+            floorTabs.addTab("Floor " + f, floorScroll);
+        }
+        
+        floorsContainer.add(floorTabs, BorderLayout.CENTER);
+        floorsContainer.revalidate();
+        floorsContainer.repaint();
+    }
+
     private void initBottomPanel() {
         JButton refreshBtn = new JButton("Refresh Dashboard");
         refreshBtn.setPreferredSize(new Dimension(0, 45));
@@ -134,32 +179,24 @@ public class AdminPanel extends JPanel {
         add(refreshBtn, BorderLayout.SOUTH);
     }
 
-    // ---------------- REFRESH LOGIC ----------------
     public void refreshStats() {
-        // Fetch latest data from DataStore (SQLite)
-        double revenue = store.getTotalRevenue();
+        // Update Stats
+        lblRevenue.setText(String.format("RM %.2f", store.getTotalRevenue()));
+        lblUnpaidFines.setText(String.format("RM %.2f", store.getTotalUnpaidFines()));
+        
         int occupied = store.getOccupiedSpotCount();
-        int totalSpots = store.getTotalSpotCount();
-        double unpaidFines = store.getTotalUnpaidFines();
+        int total = store.getTotalSpotCount();
+        double percent = (total > 0) ? (occupied * 100.0 / total) : 0;
+        lblOccupancy.setText(String.format("%d/%d (%.1f%%)", occupied, total, percent));
 
-        // Safe percentage calculation
-        double percent = (totalSpots > 0) ? (occupied * 100.0 / totalSpots) : 0;
-        String occupancyStr = String.format("%d/%d (%.1f%%)", occupied, totalSpots, percent);
-
-        // Update Labels
-        lblRevenue.setText(String.format("RM %.2f", revenue));
-        lblOccupancy.setText(occupancyStr);
-        lblUnpaidFines.setText(String.format("RM %.2f", unpaidFines));
-
-        // Update Parked Vehicles List
+        // Update Vehicle List
         vehiclesListModel.clear();
         store.getAllActiveSessions().forEach(session ->
                 vehiclesListModel.addElement(String.format("%-10s | Spot: %s", 
                     session.getPlate(), session.getSpotId()))
         );
         
-        // Ensure the panel redraws
-        revalidate();
-        repaint();
+        // Re-render the visual map
+        renderFloorMap();
     }
 }

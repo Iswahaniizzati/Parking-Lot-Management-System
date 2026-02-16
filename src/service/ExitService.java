@@ -34,6 +34,12 @@ public class ExitService {
         if (session == null) return null;
 
         long hours = calculateHoursCeiling(session.getEntryTime(), exitTime);
+        System.out.println("=== PREVIEW DEBUG ===");
+        System.out.println("Plate: " + session.getVehicle().getPlate());
+        System.out.println("Entry (string): " + session.getEntryTime());
+        System.out.println("Exit (param):   " + exitTime);
+        System.out.println("Calculated hours: " + hours);
+        System.out.println("Overstay hours:   " + (hours > 24 ? hours - 24 : 0));
         double parkingFee = hours * getHourlyRate(session, session.getVehicle());
 
         // Use the scheme that was active WHEN THIS VEHICLE ENTERED
@@ -83,6 +89,9 @@ public class ExitService {
         for (FineRecord fine : newFines) {
             dataStore.addFine(fine);
         }
+        System.out.println("[DEBUG] New fines created during confirmExit: " + newFines.size());
+        newFines.forEach(f -> 
+        System.out.println("  → " + f.getReason() + " : RM " + f.getAmount() + " (unpaid)"));   
 
         double amountLeft = payment.getAmountPaid() - payment.getParkingFee();
         List<FineRecord> unpaidFines = dataStore.getUnpaidFinesByPlate(plate);
@@ -120,16 +129,19 @@ public class ExitService {
     private double calculatePreviewFines(ParkingSession session, long hours, FineScheme scheme) {
         double total = 0;
 
-        // Overstay fine – using the correct scheme
         if (hours > 24) {
-            total += scheme.calculateFine(hours - 24);
+            double overstay = scheme.calculateFine(hours - 24);
+            System.out.println("[PREVIEW FINE] Overstay fine: RM " + overstay);
+            total += overstay;
         }
 
-        // Reserved spot violation (fixed amount – no scheme dependency)
-        if (session.getSpotId().contains("RES") && !session.getVehicle().isVIP()) {
+        boolean isReservedViolation = session.getSpotId().contains("RES") && !session.getVehicle().isVIP();
+        if (isReservedViolation) {
+            System.out.println("[PREVIEW FINE] Reserved violation: +100.0");
             total += 100.0;
         }
 
+        System.out.println("[PREVIEW FINE] Total new fines: RM " + total);
         return total;
     }
 
@@ -169,19 +181,33 @@ public class ExitService {
 
         String spotType = spot.getType().toString().toUpperCase();
 
-        // Special rule: Handicapped vehicle with HC card gets discounted rate anywhere
+        System.out.println("[RATE DEBUG FOR " + vehicle.getPlate() + "]");
+        System.out.println("  Spot ID:        " + session.getSpotId());
+        System.out.println("  Spot type:      " + spotType);
+        System.out.println("  Vehicle type:   " + vehicle.getType());
+        System.out.println("  Has HC card:    " + vehicle.hasHcCard());
+
         if (vehicle.getType().equalsIgnoreCase("HANDICAPPED") && vehicle.hasHcCard()) {
-            return 2.0;
+            System.out.println("  → HC card holder detected");
+            if ("HANDICAPPED".equals(spotType)) {
+                System.out.println("  → FREE (in HC spot)");
+                return 0.0;
+            } else {
+                System.out.println("  → Discounted RM 2.00 (non-HC spot)");
+                return 2.0;
+            }
         }
 
-        // Normal rates by spot type
-        return switch (spotType) {
+        // normal switch...
+        double rate = switch (spotType) {
             case "COMPACT"     -> 2.0;
             case "REGULAR"     -> 5.0;
-            case "HANDICAPPED" -> vehicle.hasHcCard() ? 0.0 : 2.0;  // free only in HC spot with card
+            case "HANDICAPPED" -> vehicle.hasHcCard() ? 0.0 : 2.0;
             case "RESERVED"    -> 10.0;
             default            -> 5.0;
         };
+        System.out.println("  → Final rate: RM " + rate);
+        return rate;
     }
 
     private long calculateHoursCeiling(String entryTimeStr, LocalDateTime exitTime) {

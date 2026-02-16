@@ -75,30 +75,50 @@ public class EntryPanel extends JPanel {
         // --- Confirm Action Listener ---
         confirmBtn.addActionListener(e -> {
             String plate = plateField.getText().trim();
-            String type = typeCombo.getSelectedItem().toString();
-            boolean hasHcCard = hcCheckBox.isSelected();
-            boolean isVIP = vipCheckBox.isSelected(); // get VIP status
-
             if (plate.isEmpty() || selectedSpotId == null) {
                 JOptionPane.showMessageDialog(this, "Please enter a plate and select a green spot!");
                 return;
             }
 
-            // 1️⃣ Create Vehicle object with 4 arguments
-            Vehicle vehicle = new Vehicle(plate, type, hasHcCard, isVIP);
+            // Read HC checkbox
+            boolean hasHcCard = hcCheckBox.isSelected();
 
-            // 2️⃣ Register entry
+            // Determine vehicle type
+            String vehicleType;
+            if (hasHcCard) {
+                vehicleType = "HANDICAPPED";
+            } else {
+                vehicleType = typeCombo.getSelectedItem().toString();
+            }
+
+            boolean isVIP = vipCheckBox.isSelected();
+
+            // Normalize plate
+            String normalizedPlate = plate.toUpperCase().replace("O", "0");
+
+            // Debug
+            System.out.println("[ENTRY DEBUG] Plate: " + normalizedPlate);
+            System.out.println("[ENTRY DEBUG] HC checked: " + hasHcCard);
+            System.out.println("[ENTRY DEBUG] Vehicle type set to: " + vehicleType);
+            System.out.println("[ENTRY DEBUG] VIP: " + isVIP);
+
+            // CREATE VEHICLE - THIS LINE WAS WRONG
+            Vehicle vehicle = new Vehicle(normalizedPlate, vehicleType, hasHcCard, isVIP);
+
+            // Register entry
             String ticketNo = entryService.registerVehicleEntry(vehicle, selectedSpotId);
 
             if (ticketNo != null) {
                 JOptionPane.showMessageDialog(this, "Entry Successful!\nTicket Printed: " + ticketNo);
                 plateField.setText("");
+                typeCombo.setSelectedIndex(0);
                 hcCheckBox.setSelected(false);
                 vipCheckBox.setSelected(false);
                 selectedSpotId = null;
                 refreshSpotGrid();
             } else {
-                JOptionPane.showMessageDialog(this, "Error: This spot is not suitable for a " + type + "!");
+                JOptionPane.showMessageDialog(this, 
+                    "Error: This spot is not suitable for a " + vehicleType + "!");
             }
         });
 

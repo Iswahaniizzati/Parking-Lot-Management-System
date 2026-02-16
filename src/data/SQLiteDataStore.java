@@ -8,6 +8,7 @@ import java.sql.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import model.FineRecord;
 import model.ParkingSession;
 import model.ParkingSpot;
@@ -64,6 +65,7 @@ public class SQLiteDataStore implements DataStore {
                 vehicle_type TEXT,
                 has_hc_card INTEGER,
                 is_vip INTEGER,
+                fine_scheme TEXT,
                 entry_time TEXT NOT NULL,
                 exit_time TEXT,
                 duration_hours INTEGER,
@@ -321,77 +323,74 @@ public class SQLiteDataStore implements DataStore {
     }
 
     // --- Session Management ---
-    // --- Create new session ---
+// --- Create new session ---
     @Override
     public void createSession(ParkingSession session) {
-        String sql = "INSERT INTO parking_session (ticket_no, plate, spot_id, entry_time) VALUES (?, ?, ?, ?);";
+        // Now includes fine_scheme column
+        String sql = "INSERT INTO parking_session (ticket_no, plate, spot_id, entry_time, vehicle_type, has_hc_card, is_vip, fine_scheme) VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, session.getTicketNo());
-            stmt.setString(2, session.getPlate());         // plate from Vehicle
+            stmt.setString(2, session.getPlate());
             stmt.setString(3, session.getSpotId());
             stmt.setString(4, session.getEntryTime());
+            stmt.setString(5, session.getVehicle().getType()); 
+            stmt.setInt(6, session.getVehicle().hasHcCard() ? 1 : 0);
+            stmt.setInt(7, session.getVehicle().isVIP() ? 1 : 0);
+            
+            // Use the fine scheme attached to the session object
+            stmt.setString(8, session.getFineScheme()); 
+            
             stmt.executeUpdate();
         } catch (SQLException e) {
             e.printStackTrace();
         }
     }
 
-// --- Get open session by plate ---
+    /**
+     * Reusable helper to map database rows back to Java objects.
+     * This eliminates the "Memory Loss" for HC cards and Fine Schemes.
+     */
+    private ParkingSession mapResultSetToSession(ResultSet rs) throws SQLException {
+        // Reconstruct Vehicle with actual data
+        Vehicle vehicle = new Vehicle(
+            rs.getString("plate"),
+            rs.getString("vehicle_type"),
+            rs.getInt("has_hc_card") == 1,
+            rs.getInt("is_vip") == 1
+        );
+
+        // Reconstruct Session with the fine scheme stored at entry
+        return new ParkingSession(
+            rs.getString("ticket_no"),
+            vehicle,
+            rs.getString("spot_id"),
+            rs.getString("entry_time"),
+            rs.getString("fine_scheme") // No more hardcode!
+        );
+    }
+
     @Override
     public ParkingSession getOpenSessionByPlate(String plate) {
         String sql = "SELECT * FROM parking_session WHERE plate = ? AND exit_time IS NULL;";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, plate);
             try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    Vehicle vehicle = new Vehicle(
-                            rs.getString("plate"),
-                            "UNKNOWN", 
-                            false, 
-                            false 
-                    );
-
-                    return new ParkingSession(
-                        rs.getString("ticket_no"),
-                        vehicle,
-                        rs.getString("spot_id"),
-                        rs.getString("entry_time"),
-                        "Fixed Fine (RM 50)" // HARDCODE this or fetch from config
-                    );
-                }
+                if (rs.next()) return mapResultSetToSession(rs);
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        } catch (SQLException e) { e.printStackTrace(); }
         return null;
     }
 
-    // --- Get all active sessions ---
     @Override
     public List<ParkingSession> getAllActiveSessions() {
         List<ParkingSession> sessions = new ArrayList<>();
         String sql = "SELECT * FROM parking_session WHERE exit_time IS NULL;";
         try (Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(sql)) {
+             ResultSet rs = stmt.executeQuery(sql)) {
             while (rs.next()) {
-                Vehicle vehicle = new Vehicle(
-                        rs.getString("plate"),
-                        "UNKNOWN",
-                        false,
-                        false
-                );
-
-                sessions.add(new ParkingSession(
-                        rs.getString("ticket_no"),
-                        vehicle,
-                        rs.getString("spot_id"),
-                        rs.getString("entry_time"),
-                        "Fixed Fine (RM 50)" // Removed rs.getString("fine_scheme")
-                ));
+                sessions.add(mapResultSetToSession(rs));
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        } catch (SQLException e) { e.printStackTrace(); }
         return sessions;
     }
 
@@ -637,6 +636,18 @@ public class SQLiteDataStore implements DataStore {
             }
         } catch (SQLException e) { e.printStackTrace(); }
         return null;
+    }
+
+    @Override
+    public Map<String, ParkingSession> getOccupiedSpotsMap() {
+        java.util.Map<String, ParkingSession> map = new java.util.HashMap<>();
+        // We reuse your existing method to get active sessions
+        List<ParkingSession> activeSessions = getAllActiveSessions();
+        
+        for (ParkingSession session : activeSessions) {
+            map.put(session.getSpotId(), session);
+        }
+        return map;
     }
 
 

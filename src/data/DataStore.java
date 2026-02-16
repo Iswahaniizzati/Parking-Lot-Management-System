@@ -1,6 +1,7 @@
 package data;
 
 import java.util.List;
+import java.util.Map;
 import model.FineRecord;
 import model.ParkingSession;
 import model.ParkingSpot;
@@ -38,6 +39,7 @@ public interface DataStore {
     void reduceFineAmount(FineRecord fine, double amountPaid);
     void setActiveFineScheme(String scheme);  // save fine scheme for future entries
     String getActiveFineScheme();             // optional getter
+    Map<String, ParkingSession> getOccupiedSpotsMap();
 
 
 
