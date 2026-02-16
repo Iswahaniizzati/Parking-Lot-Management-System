@@ -61,8 +61,6 @@ public class ExitPanel extends JPanel {
         plateField = new JTextField(12);
         topPanel.add(plateField);
 
-        hcCheckBox = new JCheckBox("HC Card Holder?");
-        topPanel.add(hcCheckBox);
 
         topPanel.add(new JLabel("Exit Time (yyyy-MM-ddTHH:mm):"));
         exitTimeField = new JTextField(16);
@@ -272,7 +270,6 @@ public class ExitPanel extends JPanel {
 
                 // Reset ONLY input fields — KEEP the receipt visible
                 plateField.setText("");
-                hcCheckBox.setSelected(false);
                 exitTimeField.setText(LocalDateTime.now().format(DISPLAY_FORMAT));
                 processBtn.setEnabled(false);
 
@@ -405,7 +402,6 @@ public class ExitPanel extends JPanel {
     private void resetPanel() {
         //receiptArea.setText("");
         plateField.setText("");
-        hcCheckBox.setSelected(false);
         exitTimeField.setText(LocalDateTime.now().format(DISPLAY_FORMAT));
         processBtn.setEnabled(false);
         currentSession = null;
